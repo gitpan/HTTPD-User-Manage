@@ -93,8 +93,8 @@ sub encrypt {
     my $newstyle = defined $_[1]; # || defined $NewStyle{ join("-",@Config{qw(osname osvers)}) };
     my($passwd) = "";
     my($scheme) = $self->{ENCRYPT} || "crypt";
-    #not quite sure where we're at risk here...
-    $_[0] =~ /^[^<>;|]+$/ or Carp::croak("Bad password name"); $_[0] = $&;
+    # not quite sure where we're at risk here...
+    # $_[0] =~ /^[^<>;|]+$/ or Carp::croak("Bad password name"); $_[0] = $&;
     if($scheme eq "crypt") {
 	$passwd = crypt($_[0], salt($newstyle));
     }
@@ -125,13 +125,12 @@ sub salt {
 }
 
 my(@saltset) = (qw(. /), 0..9, "A".."Z", "a".."z");
-srand(time ^ $$);
 
 sub randchar {
   local($^W) = 0; #we get a bogus warning here
   my($count) = @_;
   my $str = "";
-  $str .= $saltset[int(rand(64))+1] while $count--;
+  $str .= $saltset[rand(@saltset)] while $count--;
   $str;
 }
 

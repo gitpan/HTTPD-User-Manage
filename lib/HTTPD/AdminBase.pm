@@ -1,4 +1,4 @@
-# $Id: AdminBase.pm,v 1.16 1998/01/09 12:43:09 lstein Exp lstein $
+# $Id: AdminBase.pm,v 1.16 1998/01/09 12:43:09 lstein Exp $
 package HTTPD::AdminBase;
 use Carp ();
 use Fcntl ();
@@ -217,7 +217,7 @@ sub unlock {
     return 1 unless $self->{LOCKING};
     my $FH = $self->{'_LOCKFH'};
     flock($FH, $LOCK_UN);
-    CORE::close($FH);
+    close $FH;
     unlink $self->{'_LOCKFILE'};
     print STDERR "unlock-> $self->{'_LOCKFILE'}\n" if $Debug;
     1;

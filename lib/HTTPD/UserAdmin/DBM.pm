@@ -71,7 +71,9 @@ sub fetch {
     return \%r;
 }
 
-sub _escape { $_=shift; s/([,=:])/uc sprintf("%%%02x",ord($1))/ge; return $_; }
+# Extended _escape to process control characters too [CJD]
+# sub _escape { $_=shift; s/([,=:])/uc sprintf("%%%02x",ord($1))/ge; return $_; }
+sub _escape { $_=shift; s/([\000-\037,=:%])/uc sprintf("%%%02x",ord($1))/ge; return $_; }
 sub _unescape { $_=shift; s/%([0-9a-fA-F]{2})/pack("c",hex($1))/ge; return $_; }
 
 package HTTPD::UserAdmin::DBM::_generic;

@@ -1,8 +1,12 @@
 #!/usr/local/bin/perl
 
 use HTTPD::Realm 1.5
-$VERSION = 1.53;
+$VERSION = 1.54;
 
+# Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
+# permit textarea boxes as well as simple text boxes. The fields tag
+# becomes 'm' followed by width "." height (eg m40.5).
+#
 ##############################################################
 # User interface:
 # Called with the name of an existing (normal) user, allows
@@ -29,7 +33,7 @@ $VERSION = 1.53;
 
 # Path to our configuration file.  Change as appropriate for
 # your site.
-$CONFIG_FILE = '/usr/local/apache/etc/realms.conf';
+$CONFIG_FILE = '/etc/httpd/conf/realms.conf';
 
 # Set this to the name of your server.  Only 'apache' is guaranteed
 # to work. 'ncsa' and 'netscape' might work too -- you'll have to try.
@@ -57,7 +61,7 @@ $USE_OWN_ACCESS_CONTROL = 0;
 # owner writable (-rw-r--r--).  You may wish to change this to group-writable
 # if you wish to make this script set-gid.
 # e.g. $CREATE_MODE = 0664;
-$CREATE_MODE = 0664;		# -rw-rw-r-- 
+$CREATE_MODE = 0644;		# -rw-r--r-- 
 
 # If you are using this script from the command line, you
 # may need to change $STTY to point to the position of the 
@@ -451,21 +455,32 @@ sub generate_user_page {
 
     print h1($current_passwd ? "Edit User \"$user\"" : "New User \"$user\"");
 
-    # Other fields
+    # Other fields [Turned from horizontal to vertical listing, CJD]
     if (my %fields = $db->fields) {
 	my (@rows,@cells);
 	my $info = $db->get_fields(-name=>$user,-fields=>[keys %fields]);
-	push(@rows,th({align=>LEFT},[keys %fields]));
+	##CJD push(@rows,th({align=>LEFT},[keys %fields]));
 	foreach (keys %fields) {
-	    my $length;
+	    @cells = (b($_));	##CJD
+	    my $length,$height;
 	    if ($fields{$_}=~/(\d+)/) {
 		$length = $1;
 	    } else {
 		$length = $fields{$_}=~/^[fi]$/ ? 6 : 20;
 	    }
-	    push(@cells,textfield(-name=>"F_$_",-size=>$length,-value=>ref($info) ? $info->{$_} : ''));
+	    my $ref_info = ref($info) ? $info->{$_} : '';
+	    if ($fields{$_}=~/^m\d*\.(\d+)/) {
+		$height = $1;
+		# Multi-line textbox [CJD]
+		push(@cells,textarea(-name=>"F_$_",-columns=>$length,-rows=>$height,-value=>$ref_info));
+	    }
+	    else {
+		# Textbox
+		push(@cells,textfield(-name=>"F_$_",-size=>$length,-value=>$ref_info));
+	    }
+	    push(@rows,td(\@cells));	##CJD
 	}
-	push(@rows,td(\@cells));
+	##CJD push(@rows,td(\@cells));
 	$other_fields = strong('Other Information:') . table(TR(\@rows));
     }
 
@@ -527,7 +542,7 @@ sub generate_user_page {
 }
 
 # --------------------- command line functions --------------------
-# Usage: change_passwd.cgi <database> <command> <user> <value1> <value2> <value3>...
+# Usage: user_manage <database> <command> <user> <value1> <value2> <value3>...
 #
 # commands: adduser deleteuser setgroup view
 #
@@ -546,7 +561,7 @@ sub dbm_manage {
     my($command,@rest) = @ARGV;
 
     my $usage = <<USAGE;
-Usage: change_passwd.cgi [-r realm] <command> <user> <value1> <value2>...
+Usage: $0 [-r realm] <command> <user> <value1> <value2>...
        Manage Apache databases from the command line.
 
 Arguments:
@@ -572,7 +587,7 @@ Commands:
 USAGE
     ;
     die $usage if $help;
-    die $usage if (!ref($realm) && !$realm);
+    die $usage if !$realm;
     
     die "Unknown database realm \"$realm\".\n",$usage unless $REALMS->exists($realm);
     my $db;
@@ -878,7 +893,7 @@ sub prompt_default {
 sub password_prompt {
     my $line;
     my ($pw1,$pw2);
-    system "$STTY -echo </dev/tty" and die "$STTY: $!";	# turn off echo
+    system "$STTY -cbreak -echo >/dev/tty" and die "$STTY: $!";	# turn off echo
     do {
 	$pw1 = prompt("New password: ");
 	$pw2 = prompt("\nRe-type new password: ");
@@ -886,7 +901,7 @@ sub password_prompt {
 	print STDERR "The two passwords don't match. Try again.\n"
 	    unless $pw1 eq $pw2;
     } until $pw1 eq $pw2;
-    system "$STTY echo </dev/tty";	# turn on echo
+    system "$STTY -cbreak echo >/dev/tty";	# turn on echo
     return $pw1;
 }
 

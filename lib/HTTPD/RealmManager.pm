@@ -2,7 +2,7 @@ package HTTPD::RealmManager;
 require Exporter;
 @ISA = Exporter;
 @EXPORT = qw(rearrange);
-$VERSION = 1.3;
+$VERSION = 1.31;
 
 use Carp;
 require HTTPD::Realm;
@@ -462,7 +462,12 @@ sub open_passwd {
 	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
 	   $params{DBType} = 'SQL';
 	   $params{Driver} = $realm->driver;
-	   @params{User,Auth} = ('','');  # not yet used 
+#
+# do what Lincoln didn't:
+           $params{User} = $p->{dblogin};
+           $params{Auth} = $p->{dbpassword};
+           $params{DEBUG} = 0;
+#
 	   $params{UserTable} = $p->{usertable};
 	   $params{NameField} = $p->{userfield};
 	   $params{PasswordField} = $p->{passwdfield};
@@ -508,9 +513,14 @@ sub open_group {
 	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
 	  $params{DBType} = 'SQL';
 	  $params{Driver} = $realm->driver;
-	  @params{User,Auth} = ('','');  # not yet used
+#
+# do what Lincoln didn't:
+           $params{User} = $p->{dblogin};
+           $params{Auth} = $p->{dbpassword};
+           $params{DEBUG} = 0;
+#
 	  $params{GroupTable} = $p->{grouptable};
-	  $params{NameField} = $p->{userfield};
+	  $params{NameField} = $p->{groupuserfield} || $p->{userfield};
 	  $params{GroupField} = $p->{groupfield};
 	  $params{UserTable} = $p->{usertable};  # needed for obscure reasons
 	  next; }                              if $groupType=~/sql/i;
@@ -689,7 +699,10 @@ sub group {
 
     # Shortcut to avoid doing and undoing unnecessary work.
     if (ref($db)=~/DBM::apache/) {
-	return split(',',$db->{'_HASH'}->{$user});
+      # check for Apache's weird combined user/group database format
+      return $self->{groupDB}->{DB} eq $self->{userDB}->{DB}
+	 ? split(',',(split(':',$db->{'_HASH'}->{$user}))[1])
+	   : split(',',$db->{'_HASH'}->{$user});
     }
 
     my ($g,%groups);

@@ -1,7 +1,7 @@
 package HTTPD::RealmDef;
 use Carp;
 use HTTPD::RealmManager;
-$VERSION = $HTTPD::Realm::VERSION = 1.51;
+$VERSION = $HTTPD::Realm::VERSION = 1.52;
 
 use overload '""'=>\&name;
 
@@ -432,9 +432,12 @@ containing the following fields:
 
    database        name of the SQL database
    host            name of the SQL database host
+dblogin
+dbpassword
    usertable       name of the SQL table containing users & passwords
    grouptable      name of the SQL table containing groups
    userfield       name of the field containing the user ID
+groupuserfield
    groupfield      name of the field containing the group name
    passwdfield     name of the field containing the encrypted password
    userfield_len   length of the user ID field
@@ -500,6 +503,16 @@ sub database {
     return shift->{database} || "www\@localhost";
 }
 
+#
+# added by John Porter:
+#
+sub dblogin {
+    return shift->{dblogin};
+}
+sub dbpassword {
+    return shift->{dbpassword};
+}
+
 sub fields {
     return shift->{fields};
 }
@@ -542,9 +555,12 @@ sub name {
 # it will contain the keys:
 # host                name of the database host
 # database            name of the database
+# dblogin
+# dbpassword
 # usertable           name of the table that user/passwd/other info is in
 # grouptable          name of the table containing user/group pairs
 # userfield           name of the user field (both tables)
+# groupuserfield
 # groupfield          name of the group field (group table only)
 # passwdfield         name of the password field (user table only)
 # userfield_len       length of the user field
@@ -557,9 +573,15 @@ sub SQLdata {
     my %result;
     @result{qw(database host)} = split('@',$self->database);
     $result{host}           ||= 'localhost';
+#
+# Do what Lincoln didn't:
+    $result{dblogin}        = $self->dblogin;
+    $result{dbpassword}     = $self->dbpassword;
+#
     $result{usertable}      = $u->{table}  || 'users';
     $result{grouptable}     = $g->{table};  # no default
     $result{userfield}      = $g->{uid} || $u->{uid} ||  'users';
+    $result{groupuserfield}      = $g->{guid} || $u->{guid} ||  'users';
     $result{groupfield}     = $g->{group};
     $result{passwdfield}    = $u->{password} || 'password';
     $result{userfield_len}  = $u->{uid_len} || $u->{user_len} || 12;
@@ -599,6 +621,8 @@ use HTTPD::RealmManager;
 use Carp;
 
 %VALID_DIRECTIVES = (
+'dblogin' =>1,
+'dbpassword' =>1,
     'users'             =>1, # file or table of user/passwd info
     'groups'            =>1, # file or table of user/group info
     'database'          =>1, # database name (SQL only)
@@ -686,7 +710,7 @@ sub connect {
     my $self = shift;
     my ($writable,$realm,$mode) = rearrange([[WRITABLE,WRITE,MODIFY],REALM,MODE],@_);
     my $r = $self->realm($realm);
-    die "Unknown realm $relm" unless ref($r);
+    die "Unknown realm $realm" unless ref($r);
     my(@p);
     push(@p,'-writable'=>$writable) if $writable;
     push(@p,'-mode'=>$mode) if $mode;

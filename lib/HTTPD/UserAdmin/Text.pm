@@ -1,4 +1,4 @@
-# $Id: Text.pm,v 1.2 1997/12/12 01:52:23 lstein Exp lstein $
+# $Id: Text.pm,v 1.2 1997/12/12 01:52:23 lstein Exp $
 package HTTPD::UserAdmin::Text;
 use HTTPD::UserAdmin ();
 use Carp ();
@@ -36,7 +36,6 @@ sub _tie {
     my($key,$val);
     
     while(<$fh>) { #slurp! need a better method here.
-	next if /^#/;
 	($key,$val) = $self->_parseline($fh, $_);
 	$self->{'_HASH'}{$key} = $val; 
     }

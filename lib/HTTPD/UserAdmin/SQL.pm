@@ -113,7 +113,6 @@ sub update {
     return 0 unless $self->exists($username);
 
     my(%f);
-    $f{$self->{PASSWORDFIELD}}=$self->encrypt($passwd) if $passwd;
     if ($other) {
 	Carp::croak('Specify other fields as a hash ref for SQL databases')
 	    unless ref($other) eq 'HASH';
@@ -121,6 +120,8 @@ sub update {
 	      $f{$_} = $other->{$_};
 	  }
     }
+
+    $f{$self->{PASSWORDFIELD}}=$self->encrypt($passwd) if $passwd;
 
     my $statement = 
 	sprintf("UPDATE %s SET %s\n WHERE %s = '%s'\n",
@@ -182,7 +183,7 @@ sub _is_string {
 	    my $st = $self->{'_DBH'}->prepare("LISTFIELDS $self->{USERTABLE}") 
 		|| Carp::croak($DBI::errstr);
 	    $st->execute || Carp::croak($DBI::errstr);
-	    my $types = $st->{TYPE};
+	    my $types = $st->{msql_type};
 	    foreach (@{$st->{NAME}}) {
 		$self->{'_TYPES'}->{$_} = Msql::CHAR_TYPE() eq (shift @{$types});
 	    }
