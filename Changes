@@ -1,0 +1,7 @@
+1.57	Fri Dec  1 11:37:03 EST 2000
+	-Fixes for exists() failure and other persistent bugs,
+		courtesy Adi Fairbank <adi@certsite.com>.
+	-Removed some bug warnings.
+
+1.56 and earlier
+	no change data available

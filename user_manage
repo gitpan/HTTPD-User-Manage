@@ -1,7 +1,7 @@
 #!/usr/local/bin/perl
 
 use HTTPD::Realm 1.5
-$VERSION = 1.54;
+$VERSION = 1.57;
 
 # Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
 # permit textarea boxes as well as simple text boxes. The fields tag

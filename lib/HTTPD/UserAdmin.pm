@@ -15,6 +15,21 @@ sub delete {
     $rc;
 }
 
+sub suspend {
+    my($self, $user) = @_;
+    $self->{'_HASH'}->{$user} = "!".$self->{'_HASH'}->{$user}
+      if $self->{'_HASH'}->{$user} !~ m/^!/;
+    return 0 unless $self->{'_HASH'}->{$user} =~ m/^!/;
+    return 1;
+}
+
+sub unsuspend {
+    my($self, $user) = @_;
+    $self->{'_HASH'}->{$user} =~ s/^!//;
+    return 0 unless $self->{'_HASH'}->{$user} !~ m/^!/;
+    return 1;
+}
+
 sub list {
     keys %{$_[0]->{'_HASH'}};
 }
@@ -54,8 +69,16 @@ sub group {
 sub update {
     my($self, $username, $passwd, @fields) = @_;
     return (0, "User '$username' does not exist") unless $self->exists($username);
+    my ($old_encr, $bool);
+    if (!defined $passwd) {
+	$bool = 1;
+	$passwd = $self->password($username);
+	$old_encr = $self->{ENCRYPT};
+	$self->{ENCRYPT} = 'none';
+    }
     $self->delete($username);
     $self->add($username, $passwd, @fields);
+    $self->{ENCRYPT} = $old_encr if $bool;
     1;
 } 
 
@@ -268,6 +291,7 @@ B<PasswordField> - Field for the password  (Default is 'password')
 From here on out, things should look the same for everyone.
 
 =item add($username,$password,[@fields])
+
 =item add($username,$password,\%fields)
 
 Add a user.
@@ -296,6 +320,22 @@ Delete a user
 
     if($user->delete('dougm')) {
 	print "He's gone\n";
+    }
+
+=item suspend($username)
+
+Suspend a user
+
+    if($user->suspend('dougm')) {
+	print "Account suspended\n";
+    }
+
+=item unsuspend($username)
+
+Unsuspend a suspended user
+
+    if($user->unsuspend('dougm')) {
+	print "Account restored to normal\n";
     }
 
 =item exists($username)
@@ -327,6 +367,7 @@ Returns a list of usernames in the current database
     @users = $user->list
 
 =item update($username,$password)
+
 =item update($username,$password,\%fields) B<SQL only>
 
 Update $username with a new $password
@@ -359,6 +400,7 @@ Convert a database.
     $dbmuser = $user->convert(@Apache);
 
 =item lock([$timeout])
+
 =item unlock()
 
 These methods give you control of the locking mechanism.

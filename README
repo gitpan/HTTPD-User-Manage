@@ -1,4 +1,4 @@
-This is HTTPD-User-Manage version 1.5, a script and set of Perl
+This is HTTPD-User-Manage version 1.5X, a script and set of Perl
 modules for managing access control with the Apache, NCSA httpd, CERN
 and Netscape servers (and maybe some others).
 
@@ -11,5 +11,4 @@ control databases based on text files, DBM files, and SQL databases.
 Please see the file user_manage.html for complete details.
 
 Lincoln Stein
-lstein@w3.org
-December 30, 1997
+lstein@cshl.org

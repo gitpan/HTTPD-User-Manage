@@ -217,7 +217,7 @@ sub unlock {
     return 1 unless $self->{LOCKING};
     my $FH = $self->{'_LOCKFH'};
     flock($FH, $LOCK_UN);
-    close $FH;
+    CORE::close($FH);
     unlink $self->{'_LOCKFILE'};
     print STDERR "unlock-> $self->{'_LOCKFILE'}\n" if $Debug;
     1;

@@ -2,10 +2,15 @@
 package HTTPD::GroupAdmin::Text;
 use Carp ();
 use strict;
-use vars qw(@ISA $DLM $VERSION);
+use vars qw(@ISA $DLM $VERSION $LineMax);
 @ISA = qw(HTTPD::GroupAdmin);
 $VERSION = (qw$Revision: 1.13 $)[1];
 $DLM = ": ";
+
+# Maximum size of each line in the group file.  Anytime we have more 
+# group data than this we split it up into multiple lines.  At least 
+# Apache 1.3.4 this limitation on lines in the group file.
+$LineMax = 8 * 1024;
 
 my %Default = (PATH => ".", 
 	       DB => ".htgroup", 
@@ -37,7 +42,7 @@ sub _tie {
 				  join(" ", $self->{'_HASH'}{$key}, $val) :
 				  $val);
     }
-    close $fh;
+    CORE::close $fh;
 }
 
 sub _untie {
@@ -64,7 +69,7 @@ sub commit {
     while(($key,$val) = each %{$self->{'_HASH'}}) {
 	print $fh $self->_formatline($key,$val);
     }
-    close $fh;
+    CORE::close $fh;
     1;
 }
 
@@ -79,8 +84,18 @@ sub _parseline {
 
 sub _formatline {
     my($self,$key,$val) = @_;
+    my( $FieldMax ) = $LineMax - length( $key );
+    my( @fields );
     $val =~ s/(\w) /$1 /g;
-    join($DLM, $key,$val) . "\n";
+    while( length( $val ) > $FieldMax ) {
+      my( $tail, $field );
+      $field = substr( $val, 0, $FieldMax );
+      $val = substr( $val, $FieldMax );
+      ( $field, $tail ) = ( $field =~ m/^(.+) (\S+ ?)$/ );
+      $val = $tail . $val;
+      push( @fields, $field );
+    }
+    map( join($DLM, $key,$_) . "\n", @fields, $val );
 }
 
 sub add {

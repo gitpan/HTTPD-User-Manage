@@ -39,7 +39,7 @@ sub _tie {
 	($key,$val) = $self->_parseline($fh, $_);
 	$self->{'_HASH'}{$key} = $val; 
     }
-    close $fh;
+    CORE::close $fh;
 }
 
 sub _untie {
@@ -61,7 +61,7 @@ sub commit {
     while(($key,$val) = each %{$self->{'_HASH'}}) {
 	print $fh $self->_formatline($key,$val);
     }
-    close $fh;
+    CORE::close $fh;
     1;
 }
 
