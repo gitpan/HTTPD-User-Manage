@@ -113,8 +113,8 @@ sub SQLdata {
 #
     $result{usertable}      = $u->{table}  || 'users';
     $result{grouptable}     = $g->{table};  # no default
-    $result{userfield}      = $g->{uid} || $u->{uid} ||  'users';
-    $result{groupuserfield}      = $g->{guid} || $u->{guid} ||  'users';
+    $result{userfield}      = $u->{uid} || $g->{uid} ||  'users';
+    $result{groupuserfield} = $g->{uid} || $u->{uid} || 'users';
     $result{groupfield}     = $g->{group};
     $result{passwdfield}    = $u->{password} || 'password';
     $result{userfield_len}  = $u->{uid_len} || $u->{user_len} || 12;

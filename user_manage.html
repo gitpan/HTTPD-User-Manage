@@ -257,6 +257,16 @@ text editor and make the changes if need be.
       The default is "administrators".  Set this to an empty string to
       disable this feature entirely.
       <p>
+  <dt><code>$PROTECT_ADMINS</code>
+  <dd>This global controls whether changes to administrators' accounts 
+      are restricted. When set to 1, the password of an administrator's 
+      account may only be changed by himself. Membership in the 
+      privileged $ADMIN_GROUP may only be granted or revoked by the 
+      webmaster using conventional command line tools, but no longer by 
+      this script. Administrators thus cannot deny each other access, and 
+      they can't grant privileged access to others without the webmaster's 
+      consent.
+      <p>
   <dt><code><a name="default_group">$DEFAULT_GROUP</a></code>
   <dd>This is the default group to assign newly-created users to,
       "users" by default.  Set it to an empty string to disable

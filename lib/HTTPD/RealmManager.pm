@@ -408,7 +408,7 @@ sub fields {
     my @f = split(/\s+/,$fields);
     my %f;
     foreach (@f) {
-	my($name,$type) = split(':');
+	my($name,$type) = split(':',$_,2);
 	$f{$name} = $type || 's';  # string by default
     }
     return %f;
@@ -462,6 +462,9 @@ sub rearrange {
 	$param[$i]=~s/^\-//;     # get rid of initial - if present
 	$param[$i]=~tr/a-z/A-Z/; # parameters are upper case
     }
+
+    # make sure param has even number of elements
+    push(@param,'')  if ((@param) && ($#param % 2 == 0));
 
     my(%param) = @param;                # convert into associative array
     my(@return_array);

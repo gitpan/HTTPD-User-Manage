@@ -1,4 +1,4 @@
-# $Id: GroupAdmin.pm,v 1.1.1.1 1998/01/13 12:55:45 lstein Exp $
+# $Id: GroupAdmin.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
 
 package HTTPD::GroupAdmin;
 use HTTPD::AdminBase ();
@@ -20,6 +20,7 @@ sub delete {
 sub list {
     my($self, $group) = @_;
     return keys %{$self->{'_HASH'}} unless $group;
+    return unless $self->{'_HASH'}{$group};
     split /\s+/, $self->{'_HASH'}{$group};
 }
 

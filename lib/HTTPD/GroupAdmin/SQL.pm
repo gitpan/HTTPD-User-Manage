@@ -1,11 +1,11 @@
-# $Id: SQL.pm,v 1.1.1.1 1997/12/12 16:05:04 lstein Exp $
+# $Id: SQL.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
 package HTTPD::GroupAdmin::SQL;
 use strict;
 use DBI;
 use Carp ();
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::GroupAdmin);
-$VERSION = (qw$Revision: 1.1.1.1 $)[1];
+$VERSION = (qw$Revision: 1.2 $)[1];
 
 my %Default = (
 	       HOST => "",                  #server hostname
@@ -82,6 +82,7 @@ sub exists {
     my ($self,$groupname,$username) = @_;
     return(0, "exists: no group!") unless $groupname;
     my $select = "$self->{GROUPFIELD}='$groupname'";
+    $select = "$self->{GROUPFIELD} like '$groupname'"  if ($groupname =~ /%/);
     $select .= " AND $self->{NAMEFIELD}='$username'" if defined $username;
     my $statement = 
 	sprintf("SELECT DISTINCT %s FROM %s WHERE %s",
@@ -135,6 +136,13 @@ sub list {
 	    sprintf("SELECT DISTINCT %s FROM %s WHERE %s = '%s'",
 		    @{$self}{qw(NAMEFIELD GROUPTABLE GROUPFIELD)},
 		    $groupname);    
+        if ($groupname =~ /%/)
+        {
+	  $statement =
+	      sprintf("SELECT DISTINCT %s FROM %s WHERE %s like '%s'",
+	 	    @{$self}{qw(NAMEFIELD GROUPTABLE GROUPFIELD)},
+		    $groupname);    
+        }
     } else {
 	$statement =
 	    sprintf("SELECT DISTINCT %s FROM %s",

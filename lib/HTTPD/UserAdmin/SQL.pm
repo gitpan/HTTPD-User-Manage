@@ -1,11 +1,11 @@
-# $Id: SQL.pm,v 1.1.1.1 1999/06/23 19:01:17 lstein Exp $
+# $Id: SQL.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
 package HTTPD::UserAdmin::SQL;
 use DBI;
 use Carp ();
 use strict;
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::UserAdmin);
-$VERSION = (qw$Revision: 1.1.1.1 $)[1];
+$VERSION = (qw$Revision: 1.2 $)[1];
 
 my %Default = (HOST => "",                  #server hostname
 	       DB => "",                    #database name
@@ -177,7 +177,7 @@ sub fetch {
 
 sub _is_string {
     my ($self,$field_name,$field_value) = @_;
-    if ($self->{DRIVER} eq 'mSQL') {
+    if ($self->{DRIVER} =~ /^msql$/i) {
 	unless ($self->{'_TYPES'}) {
 	    require Msql;
 	    my $st = $self->{'_DBH'}->prepare("LISTFIELDS $self->{USERTABLE}") 
@@ -193,6 +193,28 @@ sub _is_string {
     } else {
 	return $field_value !~ /^[0-9.E-]+$/i;
     }
+}
+
+sub encrypt {
+    my($self) = shift; 
+    my($passwd) = "";
+    my($scheme) = $self->{ENCRYPT} || "crypt";
+    # not quite sure where we're at risk here...
+    # $_[0] =~ /^[^<>;|]+$/ or Carp::croak("Bad password name"); $_[0] = $&;
+    if (($self->{DRIVER} =~ /^mysql$/i) && ($scheme =~ /^MySQL(:?-Password)?$/i)) {
+        my $statement = sprintf("SELECT password('%s')\n", $_[0]);
+        print STDERR $statement if $self->debug;
+        my $sth = $self->{'_DBH'}->prepare($statement);
+        Carp::carp("Cannot prepare sth ($DBI::err): $DBI::errstr")
+	    unless $sth;
+        $sth->execute || Carp::croak($DBI::errstr);
+        my(@row) = $sth->fetchrow;
+        $sth->finish;
+        $passwd = $row[0];
+    } else {
+	$passwd = $self->SUPER::encrypt(@_);
+    }
+    return $passwd;
 }
 
 1;

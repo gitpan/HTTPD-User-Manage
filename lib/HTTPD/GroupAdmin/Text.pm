@@ -1,10 +1,10 @@
-# $Id: Text.pm,v 1.1.1.1 2000/12/01 16:24:40 lstein Exp $
+# $Id: Text.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
 package HTTPD::GroupAdmin::Text;
 use Carp ();
 use strict;
 use vars qw(@ISA $DLM $VERSION $LineMax);
 @ISA = qw(HTTPD::GroupAdmin);
-$VERSION = (qw$Revision: 1.1.1.1 $)[1];
+$VERSION = (qw$Revision: 1.2 $)[1];
 $DLM = ": ";
 
 # Maximum size of each line in the group file.  Anytime we have more 
@@ -58,21 +58,28 @@ DESTROY {
 }
 
 sub commit {
-    my($self) = @_;
-    return if $self->readonly;
-    my($fh,$db) = ($self->gensym(), $self->{DB});
-    my($key,$val);
+     my($self) = @_;
+     return if $self->readonly;
+     my($fh,$db) = ($self->gensym(), $self->{DB});
+     my($key,$val);
 
-    $db =~ /^([^<>;|]+)$/ or return (0, "Bad file name '$db'"); $db = $1; #untaint
-    open($fh, ">$db") or return (0, "open: '$db' $!");
+     $db =~ /^([^<>;|]+)$/ or return (0, "Bad file name '$db'"); $db = $1; 
+#untaint
+     my $tmp_db = "$db.$$"; # Use temp file until write is complete.
+     open($fh, ">$tmp_db") or return (0, "open: '$tmp_db' $!");
 
-    while(($key,$val) = each %{$self->{'_HASH'}}) {
-	print $fh $self->_formatline($key,$val);
-    }
-    CORE::close $fh;
-    1;
+     while(($key,$val) = each %{$self->{'_HASH'}}) {
+         print $fh $self->_formatline($key,$val)
+            or return (0, "print: '$tmp_db' failed: $!");
+     }
+     CORE::close $fh
+        or return (0, "close: '$tmp_db' failed: $!");
+     my $mode = (stat $db)[2];
+     chmod $mode, $tmp_db if $mode;
+     rename( $tmp_db,$db )
+        or return (0, "rename '$tmp_db' to '$db' failed: $!");
+     1;
 }
-
 sub _parseline {
     my($self,$fh) = (shift,shift);
     local $_ = shift;

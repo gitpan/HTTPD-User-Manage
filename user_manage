@@ -1,7 +1,7 @@
-#!/usr/bin/perl
+#!/usr/bin/perl -w
 
 use HTTPD::Realm 1.5
-$VERSION = 1.60;
+$VERSION = 1.61;
 
 # Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
 # permit textarea boxes as well as simple text boxes. The fields tag
@@ -44,6 +44,13 @@ $SERVER = 'apache';
 # users.  Set to an empty string to disable this feature.
 $ADMIN_GROUP = 'administrators';
 
+# Set this to "1" to protect administrators from one another. 
+# Only they themselves may change their own password. Membership in the 
+# administrators' group has to be granted or revoked by the webmaster using 
+# command line tools, not by some other administrator via the web interface. 
+# This variable does not have any effect unless $ADMIN_GROUP is set.
+$PROTECT_ADMINS = 1;
+
 # Set this to the default group for new users, or an empty string
 # if you don't want there to be any.
 $DEFAULT_GROUP = 'users';
@@ -73,7 +80,7 @@ $STTY = '/bin/stty';
 # ------------------- NO USER SERVICEABLE PARTS BELOW ---------------------
 $ENV{PATH} = '/bin:/usr/bin';
 $ENV{IFS} = '';
-$MAX_SCROLL = 5;
+$MAX_SCROLL = 8;
 
 BEGIN {
     if ($ENV{REQUEST_METHOD}) {
@@ -154,7 +161,7 @@ unless ($db->passwd($user)) {
 # See if this user is in the magic group.
 if ($ADMIN_GROUP && $db->match_group(-user => $user,
 				     -group => $ADMIN_GROUP)) {
-    do_administration($db);
+    do_administration($db,$user);
     exit 0;
 }
 
@@ -279,7 +286,7 @@ sub error_msg {
 
 # --------------- Administration screens are defined here --------------
 sub do_administration {
-    my $db = shift;
+    my ($db, $admin) = @_;
     $_ = '';
     $_ = $Q::action if defined($Q::action);
     
@@ -300,7 +307,7 @@ sub do_administration {
 	                    generate_user_list($db),
 	                    last SWITCH;
 
-	/set values/i   and set_user($db,$user,$Q::password1,$Q::password2,@Q::groups)
+	/set values/i   and set_user($db,$admin,$user,$Q::password1,$Q::password2,@Q::groups)
 	                    &&
 	                    generate_user_list($db,$user),
 	                    generate_user_page($db,$user),
@@ -314,6 +321,13 @@ sub do_administration {
 
 sub delete_user {
     my ($db,$user) = @_;
+    if ($PROTECT_ADMINS && $db->match_group($user, $ADMIN_GROUP)) {
+	error_msg('Error Deleting User',
+		'User ', em($user), ' is member of group ', 
+		em($ADMIN_GROUP), ' and cannot be deleted.');
+	print hr();
+	return;
+    }
     if ($db->delete_user($user)) {
 	print h1('User Deleted'),
           "The entry for user ",em($user)," was successfully deleted.",
@@ -331,7 +345,7 @@ sub delete_user {
 }
 
 sub set_user {
-    my($db,$user,$password1,$password2,@groups) = @_;
+    my($db,$admin,$user,$password1,$password2,@groups) = @_;
 
     # The two passwords have to match.
     unless ($password1 eq $password2) {
@@ -355,6 +369,14 @@ sub set_user {
     # we need to set it.
     my $current = $db->passwd($user);
     if ( !$current or ( ($current ne $password1) and !$db->match_passwd(-name=>$user,-passwd=>$password1)) ) {
+	if ($PROTECT_ADMINS && $user ne $admin 
+		&& $db->match_group($user, $ADMIN_GROUP)) {
+	    error_msg('Error Changing User',
+		'User ', em($user), ' is member of group ', 
+		em($ADMIN_GROUP), ', only he/she may change the password.');
+	    print hr();
+	    return;
+	}
 	my $success = $db->set_passwd(-user=>$user,-passwd=>$password1);
 	unless ($success) {
 	    error_msg('Error Setting Password',
@@ -371,6 +393,14 @@ sub set_user {
     my @current_groups = $db->group($user);
     @groups = sort grep($_,@groups);	# get rid of nonnull entries and sort
     if ("@current_groups" ne "@groups") {
+	if ($PROTECT_ADMINS && (grep /$ADMIN_GROUP/,@groups 
+		xor grep /$ADMIN_GROUP/,@current_groups)) {
+	    error_msg('Error Changing User',
+		'Membership of user ', em($user), ' in group ', 
+		em($ADMIN_GROUP), ' may not be changed.');
+	    print hr();
+	    return;
+	}
 	my $success = $db->set_group(-user=>$user,'-group'=>\@groups);
 	unless ($success) {
 	    error_msg('Error Setting Groups',
@@ -389,8 +419,8 @@ sub set_user {
 	my $info = $db->get_fields(-name=>$user,-fields=>[keys %fields]);
 	foreach (keys %fields) {
 	    my $new = param("F_$_");
-	    undef $new if $fields{$_}=~/i/ && $new!~/^-?\d+$/;
-	    undef $new if $fields{$_}=~/f/ && $new!~/^-?[\dEe.]+$/;
+	    undef $new if $fields{$_}=~/^i/ && $new!~/^-?\d+$/;
+	    undef $new if $fields{$_}=~/^f/ && $new!~/^-?[\dEe.]+$/;
 	    $update++ if defined($new)  && $new ne $info->{$_};
 	    $info->{$_} = $new;
 	}
@@ -462,21 +492,32 @@ sub generate_user_page {
 	##CJD push(@rows,th({align=>LEFT},[keys %fields]));
 	foreach (keys %fields) {
 	    @cells = (b($_));	##CJD
-	    my $length,$height;
-	    if ($fields{$_}=~/(\d+)/) {
+	    my ($length,$height,$default);
+	    if ($fields{$_}=~/^[msif]?(\d+)/i) {
 		$length = $1;
 	    } else {
 		$length = $fields{$_}=~/^[fi]$/ ? 6 : 20;
 	    }
-	    my $ref_info = ref($info) ? $info->{$_} : '';
-	    if ($fields{$_}=~/^m\d*\.(\d+)/) {
+	    if ($fields{$_}=~/\[(.*)\]$/) {
+		$default = $1;
+	    } else {
+		$default = ($fields{$_} =~ /^[fi]$/i) ? 0 : '';
+	    }
+	    my $ref_info = ref($info) ? $info->{$_} : $default;
+	    if ($fields{$_}=~/^c\[([^,]*(,[^,]*)*)\]$/) {
+		# Selection field
+		my @elements = split(/,/, $1);
+		my $def = ref($info) ? $info->{$_} : $elements[0];
+		push(@cells,popup_menu(-name=>"F_$_",-values=>\@elements,-default=>$def));
+	    }
+	    elsif ($fields{$_}=~/^m\d*\.(\d+)/) {
 		$height = $1;
 		# Multi-line textbox [CJD]
-		push(@cells,textarea(-name=>"F_$_",-columns=>$length,-rows=>$height,-value=>$ref_info));
+		push(@cells,textarea(-name=>"F_$_",-columns=>$length,-rows=>$height,-value=>$ref_info,-default=>$ref_info));
 	    }
 	    else {
 		# Textbox
-		push(@cells,textfield(-name=>"F_$_",-size=>$length,-value=>$ref_info));
+		push(@cells,textfield(-name=>"F_$_",-size=>$length,-value=>$ref_info,-default=>$ref_info));
 	    }
 	    push(@rows,td(\@cells));	##CJD
 	}
@@ -559,6 +600,9 @@ sub dbm_manage {
     $realm ||= $DEFAULT_REALM;
 
     my($command,@rest) = @ARGV;
+
+    # define $command to suppress 'undefined value' errors
+    $command = ''  unless (defined($command));
 
     my $usage = <<USAGE;
 Usage: $0 [-r realm] <command> <user> <value1> <value2>...
@@ -760,6 +804,23 @@ sub do_format {
 	print "Auth${dbm1}UserFile\t$password\n";
     } else {
 	$p = $realm->SQLdata;
+	if ($realm->driver() =~ /^mysql$/i)
+	{
+	    print <<END;
+Auth_MySQL_DB			$p->{database}
+Auth_MySQL_Password_Table	$p->{usertable}
+Auth_MySQL_Username_Field	$p->{userfield}
+Auth_MySQL_Password_Field	$p->{passwdfield}
+Auth_MySQL_Authoritative	on
+END
+    ;
+	    if ($crypt =~ /^MySQL(?:-Password)?$/i)
+	    {
+		print "Auth_MySQL_Scrambled_Passwords\ton\n";
+	    } else {
+		print "Auth_MySQL_Encrypted_Passwords\ton\n";
+	    }
+	} else {
 	print <<END;
 Auth_MSQLHost		$p->{host}
 Auth_MSQLDatabase	$p->{database}
@@ -768,16 +829,26 @@ Auth_MSQLuid_field 	$p->{userfield}
 Auth_MSQLpwd_field	$p->{passwdfield}
 END
     ;
+	}
     }
     if ($group) {
 	unless ($realm->grouptype=~/sql/i) {
 	    print "Auth${dbm2}GroupFile\t$group\n";
 	} else {
-	    print <<END;
+	    if ($realm->driver() =~ /^mysql$/i)
+	    {
+		print <<END;
+Auth_MySQL_Group_Table		$p->{grouptable}
+Auth_MySQL_Group_Field		$p->{groupfield}
+END
+    ;
+	    } else {
+		print <<END;
 Auth_MSQLgrp_table	$p->{grouptable}
 Auth_MSQLgrp_field	$p->{groupfield}
 END
     ;
+	    }
 	}
     }
 
@@ -813,9 +884,9 @@ sub do_setup {
 		my($length) = $fields{$_}=~/(\d+)/;
 		$length ||= 30;
 		my($type) = "char($length)";
-		$type = "int" if $fields{$_}=~/i/i;
-		$type = "real" if $fields{$_}=~/f/i;
-		push(@defs,"    $_\t" . $type);
+		$type = "int" if $fields{$_}=~/^i/;
+		$type = "real" if $fields{$_}=~/^f/;
+		push(@defs,"    $_\t" . $type . "\tnot null");
 	    }
 	}
 	unshift(@defs,"    $groupfield\tchar($grouplen)")
@@ -850,8 +921,8 @@ END
 	} elsif ($grouptable) {
 	    print STDOUT <<END;
 CREATE TABLE $grouptable (
-   $userfield\tchar($userfieldlen),
-   $groupfield\tchar($grouplen)
+   $userfield\tchar($userfieldlen)\tnot null,
+   $groupfield\tchar($grouplen)\t not null
 )\\g
 INSERT INTO $grouptable ($userfield,$groupfield)
    VALUES('$admin','$group')\\g

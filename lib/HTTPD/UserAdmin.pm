@@ -1,4 +1,4 @@
-# $Id: UserAdmin.pm,v 1.1.1.1 2002/05/31 23:03:35 lstein Exp $
+# $Id: UserAdmin.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
 package HTTPD::UserAdmin;
 use HTTPD::AdminBase ();
 use Carp ();
@@ -134,6 +134,9 @@ sub encrypt {
 	$self->{'_MD5'}->add(join(":", $username, $realm, $pass));
 	$passwd = join(":", $realm, $self->{'_MD5'}->hexdigest());
 	$self->{'_MD5'}->reset;
+    } elsif ($scheme eq "SHA") {
+	require Digest::SHA1;
+	$passwd = '{SHA}' . Digest::SHA1::sha1_base64(shift) .'=';
     } elsif ($scheme eq 'none') {
 	return $_[0];
     } else {
