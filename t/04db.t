@@ -17,7 +17,11 @@ sub test {
     print($true ? "ok $num\n" : "not ok $num $msg\n");
 }
 
-print eval "require DB_File" ? "1..14\n" : "1..0\n";
+unless (eval { require DB_File } ) {
+  print "1..0 # Skipped: no DB_File module installed\n";
+  exit 0;
+}
+print "1..14\n";
 
 test 1,$db = HTTPD::RealmManager->open(-config=>'./t/realms.conf',
 	                               -realm=>'test2',

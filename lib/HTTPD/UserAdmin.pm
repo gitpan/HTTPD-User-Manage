@@ -157,6 +157,9 @@ sub randchar {
   $str;
 }
 
+sub DESTROY {
+}
+
 #These should work fine with the _generic classes
 my %Support = (apache =>   [qw(DBM Text SQL)],
 	       ncsa   =>   [qw(DBM Text)],

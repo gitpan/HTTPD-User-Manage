@@ -1,11 +1,296 @@
 package HTTPD::RealmDef;
 use Carp;
+
+use strict;
 use HTTPD::RealmManager;
+use vars qw($VERSION);
+
 $VERSION = $HTTPD::Realm::VERSION = 1.52;
 
 use overload '""'=>\&name;
 
-=head1 NAME 
+sub new { 
+    my ($class,$name) = @_;
+    return bless { 'name' => $name },$class;
+}
+
+sub userdb {
+    my $self = shift;
+    return $self->{users} || $self->{userfile};
+}
+
+sub groupdb {
+    my $self = shift;
+    return $self->{groups} || $self->{groupfile};
+}
+
+# backwards compatability only
+sub userfile { return &userdb; }
+sub groupfile { return &groupdb; }
+
+sub mode { 
+    return shift->{mode} || 0644;
+}
+
+sub database {
+    return shift->{database} || "www\@localhost";
+}
+
+#
+# added by John Porter:
+#
+sub dblogin {
+    return shift->{dblogin};
+}
+sub dbpassword {
+    return shift->{dbpassword};
+}
+
+sub fields {
+    return shift->{fields};
+}
+
+sub usertype {
+    my $self = shift;
+    return $self->{usertype} || $self->{type};
+}
+
+sub grouptype {
+    my $self = shift;
+    return $self->{grouptype} || $self->{type};
+}
+
+sub authentication {
+    return shift->{'authentication'} || 'Basic';
+}
+
+sub driver {
+    return shift->{'driver'} || 'mSQL';
+}
+
+sub server {
+    return shift->{'server'} || 'apache';
+}
+
+sub crypt {
+    my $self = shift;
+    return $self->{'crypt'} if $self->{'crypt'};
+    return 'crypt' if lc($self->authentication) eq 'basic';
+    return 'MD5'   if lc($self->authentication) eq 'digest';
+    return 'crypt';  # default currently
+}
+
+sub name {
+    return shift->{'name'};
+}
+
+# return a pointer to an associative array with mSQL info.
+# it will contain the keys:
+# host                name of the database host
+# database            name of the database
+# dblogin
+# dbpassword
+# usertable           name of the table that user/passwd/other info is in
+# grouptable          name of the table containing user/group pairs
+# userfield           name of the user field (both tables)
+# groupuserfield
+# groupfield          name of the group field (group table only)
+# passwdfield         name of the password field (user table only)
+# userfield_len       length of the user field
+# groupfield_len      length of the group field
+# passwdfield_len     length of the password field
+sub SQLdata {
+    my $self = shift;
+    return undef unless $self->usertype=~/sql/i;
+    my ($u,$g) = ($self->split_parms($self->userdb),$self->split_parms($self->groupdb));
+    my %result;
+    @result{qw(database host)} = split('@',$self->database);
+    $result{host}           ||= 'localhost';
+#
+# Do what Lincoln didn't:
+    $result{dblogin}        = $self->dblogin;
+    $result{dbpassword}     = $self->dbpassword;
+#
+    $result{usertable}      = $u->{table}  || 'users';
+    $result{grouptable}     = $g->{table};  # no default
+    $result{userfield}      = $g->{uid} || $u->{uid} ||  'users';
+    $result{groupuserfield}      = $g->{guid} || $u->{guid} ||  'users';
+    $result{groupfield}     = $g->{group};
+    $result{passwdfield}    = $u->{password} || 'password';
+    $result{userfield_len}  = $u->{uid_len} || $u->{user_len} || 12;
+    $result{groupfield_len} = $g->{group_len} || 20;
+    $result{passwdfield_len}= $u->{password_len} || 
+	(lc($self->authentication) eq 'digest' ?  32 + 3 + length($self->name) + $result{userfield_len} : 13);
+    return \%result;
+}
+
+sub connect {
+    my $self = shift;
+    my ($writable,$mode,$server) = rearrange([[qw(WRITABLE WRITE MODIFY)],qw(MODE SERVER)],@_);
+    return new HTTPD::RealmManager(-realm   => $self,
+				  -writable => $writable,
+				  '-mode'     => $mode || $self->mode,
+				  '-server'   => $server || $self->server || 'apache');
+}
+
+# A utility routine
+sub split_parms {
+    my($self,$j) = @_;
+    my($junk,%p) = split(/\s*(\w+)=/,$j);
+    foreach (keys %p) {
+	$p{$_}=~s/^"//;
+	$p{$_}=~s/"$//;
+	if ($p{$_}=~/:[a-zA-Z]?(\d+)$/) {
+	    $p{$_}=$`;
+	    $p{"${_}_len"}=$1;
+	}
+    }
+    \%p;
+}
+
+# ----------------------------------------------------------------------------------------
+package HTTPD::Realm;
+
+use strict;
+use HTTPD::RealmManager;
+use Carp;
+
+*dbm = \&connect;
+
+my %CACHE;
+
+my %VALID_DIRECTIVES = (
+'dblogin' =>1,
+'dbpassword' =>1,
+    'users'             =>1, # file or table of user/passwd info
+    'groups'            =>1, # file or table of user/group info
+    'database'          =>1, # database name (SQL only)
+    'fields'            =>1, # other fields (SQL only)
+    'type'              =>1, # db type (text|NDBM|DB|mSQL|SQL)
+    'driver'            =>1, # SQL db driver type [mSQL]
+    'usertype'          =>1, # override db type for users only
+    'grouptype'         =>1, # override db type for groups only
+    'default'           =>1, # set default realm
+    'authentication'    =>1, # authentication scheme (Basic|Digest)
+    'server'            =>1, # server type (Apache|NCSA|Netscape)
+    'mode'              =>1, # mode for newly-created text & DBM files
+    'crypt'             =>1, # override encryption, backward compatability only
+    'userfile'          =>1, # synonyms for backward compatability only
+    'groupfile'         =>1, # synonyms for backward compatability only
+);
+
+# Security realm parsing utility -- high level interface to Doug MacEachern's
+# HTTPD utilities.
+
+# Pass the location of the configuration file.
+sub new {
+    my $class = shift;
+    my ($config_file) = rearrange([[qw(CONFIG CONFIG_FILE)]],@_);
+
+    if ($CACHE{$config_file} && -C $config_file == $CACHE{$config_file}{ctime}) {
+	return $CACHE{$config_file}{obj};
+    }
+
+    my $self = { config_file   => $config_file, };
+
+    my($realm,$realm_name,$directive,$value,$default_realm,$first_realm);
+    open(CONF,$config_file) || croak "Couldn't open $config_file: $!";
+    while (<CONF>) {
+	chomp;
+	s/\#.*$//;			# get rid of all comments
+
+	if (/<Realm\s*(\S*)\s*>/i) {
+	    croak "Syntax error in $config_file, line $.: Missing </Realm> directive.\n"
+		if $realm;
+	    croak "Syntax error in $config_file, line $.: <Realm> directive without realm name.\n"
+		unless $1;
+	    $realm = new HTTPD::RealmDef($realm_name = $1);
+	    $first_realm = $realm unless $first_realm;
+	    next;
+	}
+
+	if (/<\/Realm\s*>/i) {
+	    croak "Syntax error in $config_file, line $.: </Realm> seen without preceding <Realm> directive.\n"
+		unless $realm;
+	    croak "Incomplete definition for realm $realm.  Need Users and Type directives at line $.\n"
+		unless $realm->userdb && $realm->usertype;
+	    $self->{realms}->{$realm_name}=$realm;
+	    undef $realm;
+	    undef $realm_name;
+	    next;
+	}
+
+	next unless ($directive,$value) = /(\w+)\s*(.*)/;
+	croak "Syntax error in $config_file, line $.: $directive directive without preceding <Realm> tag.\n"
+	    unless $realm;
+	
+	$directive=~tr/A-Z/a-z/;
+	croak "Unknown directive \"$directive\" at line $.\n"
+	    unless $VALID_DIRECTIVES{$directive};
+
+	$realm->{$directive} = $directive =~ /file/ ? untaint($value) : $value;
+	if ($directive eq 'default') {
+	    croak "More than one Default directive defined at $config_file, line $.\n"
+		if $default_realm;
+	    $default_realm = $realm_name;
+	}
+
+    }
+    close CONF;
+
+    $self->{default_realm}=$default_realm || $first_realm;
+    bless $self,$class;
+    $CACHE{$config_file}{ctime} = -C $config_file;
+    return $CACHE{$config_file}{obj} = $self;
+}
+
+sub connect {
+    my $self = shift;
+    my ($writable,$realm,$mode) = rearrange([[qw(WRITABLE WRITE MODIFY)],qw(REALM MODE)],@_);
+    my $r = $self->realm($realm);
+    die "Unknown realm $realm" unless ref($r);
+    my(@p);
+    push(@p,'-writable'=>$writable) if $writable;
+    push(@p,'-mode'=>$mode) if $mode;
+    return $r->connect(@p);
+}
+
+sub exists {
+    my $self = shift;
+    my ($realm) = rearrange(['REALM'],@_);
+    return defined($self->{realms}->{$realm});
+}
+
+sub list {
+    my $self = shift;
+    return sort keys %{$self->{realms}};
+}
+
+sub realm {
+    my $self = shift;
+    my ($realm) = rearrange(['REALM'],@_);
+    $realm ||= $self->{default_realm};
+    return $self->{realms}->{$realm};
+}
+
+sub untaint {
+    my $taint = shift;
+    croak('Relative paths are not allowed in password and/or group file definitions')
+	if $taint =~ /\.\./ or $taint !~ m|^/|;
+    $taint =~ m!(/[a-zA-Z/0-9._-]+)!;
+    return $1;
+}
+
+sub DESTROY {
+  my $self = shift;
+}
+
+
+1;
+
+__END__
+
+=head1 NAME
 
 HTTPD::Realm - Database of HTTPD Security Realms
 
@@ -467,7 +752,7 @@ HTTPD::RealmManager(3) HTTPD::UserAdmin(3) HTTPD::GroupAdmin(3), HTTPD::Authen(3
 
 =head1 AUTHOR
 
-Lincoln Stein <lstein@w3.org>
+Lincoln Stein <lstein@cshl.org>
 
 Copyright (c) 1997, Lincoln D. Stein
 
@@ -476,276 +761,3 @@ it under the same terms as Perl itself.
 
 =cut
 
-sub new { 
-    my ($class,$name) = @_;
-    return bless { 'name' => $name },$class;
-}
-
-sub userdb {
-    my $self = shift;
-    return $self->{users} || $self->{userfile};
-}
-
-sub groupdb {
-    my $self = shift;
-    return $self->{groups} || $self->{groupfile};
-}
-
-# backwards compatability only
-sub userfile { return &userdb; }
-sub groupfile { return &groupdb; }
-
-sub mode { 
-    return shift->{mode} || 0644;
-}
-
-sub database {
-    return shift->{database} || "www\@localhost";
-}
-
-#
-# added by John Porter:
-#
-sub dblogin {
-    return shift->{dblogin};
-}
-sub dbpassword {
-    return shift->{dbpassword};
-}
-
-sub fields {
-    return shift->{fields};
-}
-
-sub usertype {
-    my $self = shift;
-    return $self->{usertype} || $self->{type};
-}
-
-sub grouptype {
-    my $self = shift;
-    return $self->{grouptype} || $self->{type};
-}
-
-sub authentication {
-    return shift->{'authentication'} || 'Basic';
-}
-
-sub driver {
-    return shift->{'driver'} || 'mSQL';
-}
-
-sub server {
-    return shift->{'server'} || 'apache';
-}
-
-sub crypt {
-    my $self = shift;
-    return $self->{'crypt'} if $self->{'crypt'};
-    return 'crypt' if lc($self->authentication) eq 'basic';
-    return 'MD5'   if lc($self->authentication) eq 'digest';
-    return 'crypt';  # default currently
-}
-
-sub name {
-    return shift->{'name'};
-}
-
-# return a pointer to an associative array with mSQL info.
-# it will contain the keys:
-# host                name of the database host
-# database            name of the database
-# dblogin
-# dbpassword
-# usertable           name of the table that user/passwd/other info is in
-# grouptable          name of the table containing user/group pairs
-# userfield           name of the user field (both tables)
-# groupuserfield
-# groupfield          name of the group field (group table only)
-# passwdfield         name of the password field (user table only)
-# userfield_len       length of the user field
-# groupfield_len      length of the group field
-# passwdfield_len     length of the password field
-sub SQLdata {
-    my $self = shift;
-    return undef unless $self->usertype=~/sql/i;
-    my ($u,$g) = ($self->split_parms($self->userdb),$self->split_parms($self->groupdb));
-    my %result;
-    @result{qw(database host)} = split('@',$self->database);
-    $result{host}           ||= 'localhost';
-#
-# Do what Lincoln didn't:
-    $result{dblogin}        = $self->dblogin;
-    $result{dbpassword}     = $self->dbpassword;
-#
-    $result{usertable}      = $u->{table}  || 'users';
-    $result{grouptable}     = $g->{table};  # no default
-    $result{userfield}      = $g->{uid} || $u->{uid} ||  'users';
-    $result{groupuserfield}      = $g->{guid} || $u->{guid} ||  'users';
-    $result{groupfield}     = $g->{group};
-    $result{passwdfield}    = $u->{password} || 'password';
-    $result{userfield_len}  = $u->{uid_len} || $u->{user_len} || 12;
-    $result{groupfield_len} = $g->{group_len} || 20;
-    $result{passwdfield_len}= $u->{password_len} || 
-	(lc($self->authentication) eq 'digest' ?  32 + 3 + length($self->name) + $result{userfield_len} : 13);
-    return \%result;
-}
-
-sub connect {
-    my $self = shift;
-    my ($writable,$mode,$server) = rearrange([[WRITABLE,WRITE,MODIFY],MODE,SERVER],@_);
-    return new HTTPD::RealmManager(-realm   => $self,
-				  -writable => $writable,
-				  '-mode'     => $mode || $self->mode,
-				  '-server'   => $server || $self->server || 'apache');
-}
-
-# A utility routine
-sub split_parms {
-    my($self,$j) = @_;
-    my($junk,%p) = split(/\s*(\w+)=/,$j);
-    foreach (keys %p) {
-	$p{$_}=~s/^"//;
-	$p{$_}=~s/"$//;
-	if ($p{$_}=~/:[a-zA-Z]?(\d+)$/) {
-	    $p{$_}=$`;
-	    $p{"${_}_len"}=$1;
-	}
-    }
-    \%p;
-}
-
-# ----------------------------------------------------------------------------------------
-package HTTPD::Realm;
-use HTTPD::RealmManager;
-use Carp;
-
-%VALID_DIRECTIVES = (
-'dblogin' =>1,
-'dbpassword' =>1,
-    'users'             =>1, # file or table of user/passwd info
-    'groups'            =>1, # file or table of user/group info
-    'database'          =>1, # database name (SQL only)
-    'fields'            =>1, # other fields (SQL only)
-    'type'              =>1, # db type (text|NDBM|DB|mSQL|SQL)
-    'driver'            =>1, # SQL db driver type [mSQL]
-    'usertype'          =>1, # override db type for users only
-    'grouptype'         =>1, # override db type for groups only
-    'default'           =>1, # set default realm
-    'authentication'    =>1, # authentication scheme (Basic|Digest)
-    'server'            =>1, # server type (Apache|NCSA|Netscape)
-    'mode'              =>1, # mode for newly-created text & DBM files
-    'crypt'             =>1, # override encryption, backward compatability only
-    'userfile'          =>1, # synonyms for backward compatability only
-    'groupfile'         =>1, # synonyms for backward compatability only
-);
-
-# Security realm parsing utility -- high level interface to Doug MacEachern's
-# HTTPD utilities.
-
-# Pass the location of the configuration file.
-sub new {
-    my $class = shift;
-    my ($config_file) = rearrange([[CONFIG,CONFIG_FILE]],@_);
-
-    if ($CACHE{$config_file} && -C $config_file == $CACHE{$config_file}->{'ctime'}) {
-	return $CACHE{$config_file}->{'obj'};
-    }
-
-    my $self = { config_file   => $config_file, };
-    local(*CONF);
-
-    my($realm,$realm_name,$directive,$value,$default_realm,$first_realm);
-    open(CONF,$config_file) || croak "Couldn't open $config_file: $!";
-    while (<CONF>) {
-	chomp;
-	s/\#.*$//;			# get rid of all comments
-    
-	if (/<Realm\s*(\S*)\s*>/i) {
-	    croak "Syntax error in $config_file, line $.: Missing </Realm> directive.\n"
-		if $realm;
-	    croak "Syntax error in $config_file, line $.: <Realm> directive without realm name.\n"
-		unless $1;
-	    $realm = new HTTPD::RealmDef($realm_name = $1);
-	    $first_realm = $realm unless $first_realm;
-	    next;
-	}
-
-	if (/<\/Realm\s*>/i) {
-	    croak "Syntax error in $config_file, line $.: </Realm> seen without preceding <Realm> directive.\n"
-		unless $realm;
-	    croak "Incomplete definition for realm $realm.  Need Users and Type directives at line $.\n"
-		unless $realm->userdb && $realm->usertype;
-	    $self->{realms}->{$realm_name}=$realm;
-	    undef $realm;
-	    undef $realm_name;
-	    next;
-	}
-
-	next unless ($directive,$value) = /(\w+)\s*(.*)/;
-	croak "Syntax error in $config_file, line $.: $directive directive without preceding <Realm> tag.\n"
-	    unless $realm;
-	
-	$directive=~tr/A-Z/a-z/;
-	croak "Unknown directive \"$directive\" at line $.\n"
-	    unless $VALID_DIRECTIVES{$directive};
-
-	$realm->{$directive} = $directive =~ /file/ ? untaint($value) : $value;
-	if ($directive eq 'default') {
-	    croak "More than one Default directive defined at $config_file, line $.\n"
-		if $default_realm;
-	    $default_realm = $realm_name;
-	}
-
-    }
-    close CONF;
-
-    $self->{default_realm}=$default_realm || $first_realm;
-    bless $self,$class;
-    $CACHE{$config_file}->{'ctime'} = -C $config_file;
-    return $CACHE{$config_file}->{'obj'} = $self;    
-}
-
-sub connect {
-    my $self = shift;
-    my ($writable,$realm,$mode) = rearrange([[WRITABLE,WRITE,MODIFY],REALM,MODE],@_);
-    my $r = $self->realm($realm);
-    die "Unknown realm $realm" unless ref($r);
-    my(@p);
-    push(@p,'-writable'=>$writable) if $writable;
-    push(@p,'-mode'=>$mode) if $mode;
-    return $r->connect(@p);
-}
-
-sub dbm {
-    &connect;
-}
-
-sub exists {
-    my $self = shift;
-    my ($realm) = rearrange([REALM],@_);
-    return defined($self->{realms}->{$realm});
-}
-
-sub list {
-    my $self = shift;
-    return sort keys %{$self->{realms}};
-}
-
-sub realm {
-    my $self = shift;
-    my ($realm) = rearrange([REALM],@_);
-    $realm ||= $self->{default_realm};
-    return $self->{realms}->{$realm};
-}
-
-sub untaint {
-    my $taint = shift;
-    croak('Relative paths are not allowed in password and/or group file definitions')
-	if $taint =~ /\.\./ or $taint !~ m|^/|;
-    $taint =~ m!(/[a-zA-Z/0-9._-]+)!;
-    return $1;
-}
-
-
-1;

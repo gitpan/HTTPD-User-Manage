@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl -w
 
-use lib ('./lib','./blib');
+use lib ('../blib/lib','./blib/lib');
 use HTTPD::RealmManager;
 
 BEGIN {
@@ -19,7 +19,12 @@ sub test {
 }
 
 
+unless (eval { require NDBM_File } ) {
+  print "1..0 # Skipped: no NDBM module installed\n";
+  exit 0;
+}
 print "1..14\n";
+
 test 1,$db = HTTPD::RealmManager->open(-config=>'./t/realms.conf',
 	                               -realm=>'test',
 				       -writable=>1);

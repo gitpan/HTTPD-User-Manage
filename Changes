@@ -1,3 +1,9 @@
+1.58	Mon Feb 19 22:53:42 EST 2001
+	-Fixes for locking/unlocking problems (which caused test 02 to fail)
+	-Cleaned up user_manage code slightly
+	-DBM test now aborts if NDBM module not installed.
+	-RealmManager.pm and Realm.pm now use strict.
+
 1.57	Fri Dec  1 11:37:03 EST 2000
 	-Fixes for exists() failure and other persistent bugs,
 		courtesy Adi Fairbank <adi@certsite.com>.

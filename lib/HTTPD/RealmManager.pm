@@ -1,13 +1,500 @@
 package HTTPD::RealmManager;
+use strict;
+
 require Exporter;
-@ISA = Exporter;
+use vars qw(@ISA @EXPORT $VERSION $ERROR);
+
+@ISA = 'Exporter';
 @EXPORT = qw(rearrange);
-$VERSION = 1.31;
+$ERROR  = '';
+$VERSION = 1.33;
 
 use Carp;
 require HTTPD::Realm;
 
-=head1 NAME 
+sub open {
+    my $class = shift;
+    my ($realm,$config,$rest) = rearrange([ 'REALM',['CONFIG_FILE','CONFIG']],@_);
+    croak "Must provide the path to a config file" unless -r $config;
+    my $realms = new HTTPD::Realm(-config_file=>$config,%$rest);
+    return undef unless $realms;
+    my $r = $realms->realm($realm);
+    return undef unless $r;
+    return $realms->dbm(-realm=>$r,%$rest);
+}
+
+sub new {
+    my $class = shift;
+    my ($realm,$mode,$writable,$server) = rearrange([ 'REALM', 'MODE', ['WRITE','WRITABLE'], 'SERVER' ],@_);
+    croak "Must provide a valid realm object" unless $realm && ref($realm);
+    my $self = {
+	'realm'=>$realm,
+	'mode'=>$mode || 0644,
+	'writable'=>$writable,
+	'server'=>$server,
+    };
+    bless $self,$class;
+    return undef unless $self->open_passwd;
+    return undef unless $self->open_group;
+    return $self;
+}
+
+sub open_passwd {
+    my $self = shift;
+    my $realm = $self->{realm};
+
+    # Create the right kind of HTTPD::UserAdmin and HTTPD::GroupAdmin objects.
+    my %params;
+    $params{DB} = $realm->userdb;
+    $params{Encrypt} = $realm->crypt;
+    $params{Server} = $self->{server};
+    $params{Flags} = $self->{writable} ? 'rwc' : 'r';
+    $params{Mode} = $self->{mode};
+    $params{Locking} = $self->{writable};
+    if ($realm->crypt() =~ /MD5/) {
+	$params{Encrypt} = 'MD5';
+	$self->{digest}++;
+    }
+
+    my $userType = $realm->usertype;
+  CASE: {
+      do { $params{DBType} = 'Text'; next; }    if $userType=~/text|file/i;
+      do { $params{DBType} = 'DBM'; 
+	   $params{DBMF} = "\U$userType\E"; 
+	   $params{DBMF} = 'NDBM' if $params{DBMF} eq 'DBM';
+	   next; }                              if $userType =~ /^(NDBM|GDBM|DB|DBM|SDBM|ODBM)$/;
+      do { 
+	   my $p = $realm->SQLdata;
+	   $params{DB} = $p->{database};
+	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
+	   $params{DBType} = 'SQL';
+	   $params{Driver} = $realm->driver;
+#
+# do what Lincoln didn't:
+           $params{User} = $p->{dblogin};
+           $params{Auth} = $p->{dbpassword};
+           $params{DEBUG} = 0;
+#
+	   $params{UserTable} = $p->{usertable};
+	   $params{NameField} = $p->{userfield};
+	   $params{PasswordField} = $p->{passwdfield};
+	   next; }                              if $userType=~/sql/i;
+  }
+
+    my $return = eval <<'END';
+    use HTTPD::UserAdmin 1.50;
+    $self->{userDB} = new HTTPD::UserAdmin(%params);
+END
+    ;
+    $ERROR = $@ unless $return;
+    return $return;
+}
+
+sub errstr {
+    return $ERROR;
+}
+
+sub open_group {
+    my $self = shift;
+    my $realm = $self->{realm};
+    return 1 unless $realm->groupdb;
+
+    my %params;
+    $params{DB} = $realm->groupdb;
+    $params{Server} = $self->{server};
+    $params{Flags} = $self->{writable} ? 'rwc' : 'r';
+    $params{Mode} = $self->{mode};
+    $params{Locking} = $self->{writable};
+    my $groupType = $realm->grouptype;
+
+  CASE: {
+      do { $params{DBType} = 'Text'; next }    if $groupType=~/text|file/i;
+      do {
+	  $params{DBType} = 'DBM';
+	  $params{DBMF} = "\U$groupType\E";
+	  $params{DBMF} = 'NDBM' if $params{DBMF} eq 'DBM';
+	  next }                              if $groupType =~ /^(NDBM|GDBM|DB|DBM|SDBM|ODBM)$/;
+      do { 
+	  my $p = $realm->SQLdata;
+	  $params{DB} = $p->{database};
+	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
+	  $params{DBType} = 'SQL';
+	  $params{Driver} = $realm->driver;
+#
+# do what Lincoln didn't:
+           $params{User} = $p->{dblogin};
+           $params{Auth} = $p->{dbpassword};
+           $params{DEBUG} = 0;
+#
+	  $params{GroupTable} = $p->{grouptable};
+	  $params{NameField} = $p->{groupuserfield} || $p->{userfield};
+	  $params{GroupField} = $p->{groupfield};
+	  $params{UserTable} = $p->{usertable};  # needed for obscure reasons
+	  next; }                              if $groupType=~/sql/i;
+  }
+    my $return = eval<<'END';
+    use HTTPD::GroupAdmin 1.50;
+    $self->{groupDB} = new HTTPD::GroupAdmin(%params);
+END
+    ;
+    $ERROR = $@ unless $return;
+    return $return;
+}
+
+
+sub users {
+    my $self = shift;
+    return $self->{userDB}->list();
+}
+
+# Return true if a user is in a particular group
+sub match_group {
+    my $self = shift;
+    my ($user,$group) = rearrange([['USER','NAME'],['GROUP','GRP']],@_);
+    croak "Must provide a user name" unless $user;
+    croak "Must provide a group name" unless $group;
+    return undef unless $self->{groupDB};
+
+    # Slightly different if we're using a DBM file.
+    # Result of inconsistencies in HTTPD::GroupAdmin
+    my %users;
+    grep ($users{$_}++,$self->{groupDB}->list($group));
+    return $users{$user};
+}
+
+sub open_writable {
+    my $self = shift;
+    return 1 if $self->{writable};
+    $self->{writable}++;
+    if ($self->{userDB}) {
+	$self->{userDB}->commit();
+	$self->{userDB}->close();
+	unless ($self->open_passwd()) {
+	    $ERROR = "Unable to open user file for writing";
+	    return undef;
+	}
+    }
+    if ($self->{groupDB}) {
+	$self->{groupDB}->commit();
+	$self->{groupDB}->close();
+	unless ( $self->open_group() ) {
+	    $ERROR = "Unable to open group file for writing";
+	    return undef;
+	}
+    }
+    1;
+}
+
+sub set_passwd {
+    my $self = shift;
+    my ($user,$passwd,$otherfields) = rearrange([[qw(USER NAME)],[qw(PASSWORD PASSWD)],[qw(OTHER GCOS FIELDS VALUES)] ],@_);
+    croak "Must provide a user ID" unless $user;
+    croak "Must provide a password or field values" unless $passwd || $otherfields;
+    return undef unless $self->{userDB};
+
+    # reopen if necessary
+    return undef unless $self->open_writable();
+
+    #special passwords for the digest method
+    $passwd = "$user:$self->{realm}:$passwd" if $passwd && $self->{digest};
+
+    my @other = ();
+    my $result;
+    if (defined($otherfields)) {
+	@other = ref($otherfields) eq 'ARRAY' ? @$otherfields : ($otherfields) ;
+    }
+
+    if ($self->{userDB}->exists($user)) {
+
+	# nasty hack here to avoid problems in the way that UserAdmin does its 
+        # updates (first it deletes, then it adds!)
+	my($crypt) = '';
+	unless ($passwd) {
+	    ($crypt,$self->{userDB}->{ENCRYPT}) = ($self->{userDB}->{ENCRYPT},'none');
+	    $passwd = $self->passwd($user);
+	}
+
+	@other = $self->get_fields($user) unless @other;
+	($result,$ERROR) = $self->{userDB}->update($user,$passwd,@other);
+	$self->{userDB}->{ENCRYPT} = $crypt if $crypt;
+	return $result unless $result;
+ 
+   } else {
+
+	($result,$ERROR) = $self->{userDB}->add($user,$passwd,@other);
+	return $result unless $result;
+
+    }
+    ($result,$ERROR) = $self->{userDB}->commit();
+    return $result;
+}
+
+sub set_password { &set_passwd; }
+
+sub set_fields {
+    my $self = shift;
+    my ($user,$fields) = rearrange([[qw(USER NAME)],[qw(OTHER GCOS FIELD FIELDS VALUES)] ],@_);
+    croak "Must provide a user ID" unless $user;
+    croak "Must provide field values" unless $fields;
+    my $current = $self->get_fields(-user=>$user);
+    foreach (keys %$fields) {
+	$current->{$_} = $fields->{$_};
+    }
+    return $self->set_passwd(-user=>$user,-fields=>$current);
+}
+
+# return true if passwords match
+sub match_passwd {
+    my $self = shift;
+    my ($user,$passwd) = rearrange([[qw(USER NAME)],[qw(PASSWD PASSWORD)]],@_);
+    croak "Must provide a user ID" unless $user;
+    croak "Must provide a password" unless $passwd;
+    return undef unless $self->{userDB}->exists($user);
+    $passwd = "$user:$self->{realm}:$passwd" if $self->{digest};
+    my $stored_passwd = $self->{userDB}->password($user);
+    if ($self->{userDB}->{ENCRYPT} eq 'crypt') {
+	return crypt($passwd,$stored_passwd) eq $stored_passwd;
+    } else {
+	return $self->{userDB}->encrypt($passwd) eq $stored_passwd;
+    }
+}
+
+# shortcut for match_passwd
+sub match { &match_passwd; }
+
+sub passwd {
+    my $self = shift;
+    my ($user,$passwd) = rearrange([[qw(USER NAME)],[qw(PASSWORD PASSWD)]],@_);
+    croak "Must provide a user ID" unless $user;
+    if ($passwd) { return $self->match_passwd('-user'=>$user,'-passwd'=>$passwd) };
+    return undef unless $self->{userDB}->exists($user);
+    my (@pw) = split(/:/,$self->{userDB}->password($user));
+    return $pw[1] if $self->{digest};
+    return $pw[0];
+}
+
+sub password { &passwd; }
+
+sub delete_user {
+    my $self = shift;
+    my ($user) = rearrange([[qw(USER NAME)]],@_);
+    croak "Must provide a user ID" unless $user;
+    return undef unless $self->open_writable();
+
+    $self->{userDB}->delete($user) if $self->{userDB};    
+    return unless $self->{groupDB};
+
+    my $group;
+    foreach $group ($self->{groupDB}->list) {
+	$self->{groupDB}->delete($user,$group);
+    }
+    my $result;
+    ($result,$ERROR) = $self->{groupDB}->commit();
+    return $result unless $result;
+    ($result,$ERROR) = $self->{userDB}->commit();
+    return $result;
+}
+
+# With one argument returns the groups that the user is in.
+# With two arguments returns true if user is in the group
+sub group {
+    my $self = shift;
+    my ($user,$group) = rearrange([[qw(USER NAME)],[qw(GROUP GRP)]],@_);
+    croak "Must provide a user ID" unless $user;
+    if ($group) { return $self->match_group('-user'=>$user,'-group'=>$group) };
+    return () unless my $db = $self->{groupDB};
+
+    # Shortcut to avoid doing and undoing unnecessary work.
+    if (ref($db)=~/DBM::apache/) {
+      # check for Apache's weird combined user/group database format
+      return $self->{groupDB}->{DB} eq $self->{userDB}->{DB}
+	 ? split(',',(split(':',$db->{'_HASH'}->{$user}))[1])
+	   : split(',',$db->{'_HASH'}->{$user});
+    }
+
+    my ($g,%groups);
+    foreach $g ($self->{groupDB}->list) {
+	my %user;
+	grep($user{$_}++,$self->{groupDB}->list($g));
+	$groups{$g}++ if $user{$user};
+    }
+    return keys %groups;
+}
+
+sub groups {
+    my $self = shift;
+    return () unless $self->{groupDB};
+    return $self->{groupDB}->list();
+}
+
+sub members {
+    my $self = shift;
+    my ($group) = rearrange([[qw(GROUP GRP)]],@_);
+    $group || croak "Must provide a group name";
+    return () unless $self->{groupDB};
+    return $self->{groupDB}->list($group);
+}
+
+sub set_group {
+    my $self = shift;
+    my ($user,$groups) = rearrange([[qw(USER NAME)],[qw(GROUP GRP)]],@_);
+    croak "Must provide a user ID" unless $user;
+    my $db;
+
+    # reopen if necessary
+    return undef unless $self->open_writable();
+
+    return unless $db = $self->{groupDB};
+    my (@groups) = ref($groups) ? @$groups : ($groups);
+
+    # Shortcut to avoid doing and undoing work.
+    if (ref($db)=~/DBM::apache/) {
+	$db->{'_HASH'}->{$user}=join(',',@groups);
+	$self->remove_dangling_groups();
+	return 1;
+    }
+
+    # otherwise we do it the "correct" way
+    my (%current,%new);
+    grep ($current{$_}++,$self->group($user));
+    grep ($new{$_}++,@groups);
+
+    my (@to_remove) = grep (!$new{$_},keys %current);
+    my (@to_add) = grep (!$current{$_},keys %new);
+    foreach (@to_remove) {
+	$db->delete($user,$_);
+    }
+    foreach (@to_add) {
+	$db->add($user,$_);
+    }
+
+    $self->remove_dangling_groups();
+    my $result;
+    ($result,$ERROR) = $db->commit();
+    return $result;
+}
+
+sub delete_group {
+    my $self = shift;
+    my ($group) = rearrange([[qw(GROUP GRP)]],@_);
+    $group || croak "Must provide a group name";
+    return 1 unless $self->{groupDB};
+    return undef unless $self->open_writable();
+
+    $self->{groupDB}->remove($group);
+    my $result;
+    ($result,$ERROR) = $self->{groupDB}->commit();
+    return $result;
+}
+
+sub remove_dangling_groups {
+    my $self = shift;
+    my $grp;
+    foreach $grp ($self->groups) {
+	next unless $grp;
+	$self->delete_group($grp) 
+	    unless $self->members('-group'=>$grp);
+    }
+}
+
+# Fetch field names from a SQL database.
+# Only those fields that are returned by fields() are accessible.
+# The return value is an associative array in which the keys are the
+# field names and the values are the field types (s=string, i=integer, f=real).
+sub fields {
+    my $realm = shift->{realm};
+    my $fields;
+    return () unless $fields = $realm->fields;
+    my @f = split(/\s+/,$fields);
+    my %f;
+    foreach (@f) {
+	my($name,$type) = split(':');
+	$f{$name} = $type || 's';  # string by default
+    }
+    return %f;
+}
+
+# Fetch the named fields from an SQL database.
+# Input is a user ID and a reference to a list of field names.  All fields will be
+# returned if no list specified.
+# The return value is a hash of the fields, or a reference to the hash in a scalar
+# context. 
+sub get_fields {
+    my $self = shift;
+    my ($user,$fields) = rearrange([[qw(USER NAME)],[qw(FIELDS FIELD VALUE VALUES)]],@_);
+    croak "Must provide a user ID" unless $user;
+
+    my (%ok) = $self->fields;
+    my (@fields);
+    if (defined($fields)) {
+	@fields = grep ($ok{$_},@$fields);
+    } else {
+	@fields = keys %ok;
+    }
+    $self->{userDB}->fetch($user,@fields);
+}
+
+sub error {
+    return $ERROR;
+}
+
+sub close {
+  my $self = shift;
+  do { $self->{userDB}->commit; $self->{userDB}->close() }   if $self->{userDB};
+  do { $self->{groupDB}->commit; $self->{groupDB}->close() } if $self->{groupDB};
+
+}
+
+sub DESTROY {
+    my $self = shift;
+    $self->close;
+}
+
+# -------- exported utility routine ----------
+sub rearrange {
+    my($order,@param) = @_;
+    return () unless @param;
+
+    return @param unless (defined($param[0]) && substr($param[0],0,1) eq '-');
+
+    my $i;
+    for ($i=0;$i<@param;$i+=2) {
+	$param[$i]=~s/^\-//;     # get rid of initial - if present
+	$param[$i]=~tr/a-z/A-Z/; # parameters are upper case
+    }
+
+    my(%param) = @param;                # convert into associative array
+    my(@return_array);
+
+    local($^W) = 0;
+    my($key)='';
+    foreach $key (@$order) {
+	my($value);
+	if (ref($key) eq 'ARRAY') {
+	    foreach (@$key) {
+		last if defined($value);
+		$value = $param{$_};
+		delete $param{$_};
+	    }
+	} else {
+	    $value = $param{$key};
+	    delete $param{$key};
+	}
+	push(@return_array,$value);
+    }
+    push (@return_array,{%param}) if %param;
+    return (@return_array);
+}
+
+sub realm {
+    return shift->{realm};
+}
+
+1;
+
+
+__END__
+=head1 NAME
 
 HTTPD::RealmManager - Manage HTTPD server security realms
 
@@ -140,8 +627,15 @@ Arguments:
    -mode        Override file creation mode.
    -server      Override server type.
 
+=item close()
+
+  $db->close()
+
+When you are done with the database you should close() it.  This will
+commit changes and tidy up.
+
 =item users()
- 
+
    @users = $db->users();
 
 Return all users known to this database as a (potentially very long)
@@ -350,7 +844,7 @@ Arguments:
 
     -user      Name of the user to remove
     -name      Alias for -user
-   
+
 A true result code indicates that the database was successfully
 updated.  The database must be writable for this method to succeed.
 
@@ -371,7 +865,7 @@ Arguments:
 
     -group      Name of the user to remove
     -grp        Alias for -group
-   
+
 A true result code indicates that the database was successfully
 updated.  The database must be writable for this method to succeed.
 
@@ -395,7 +889,7 @@ HTTPD::Realm(3) HTTPD::UserAdmin(3) HTTPD::GroupAdmin(3), HTTPD::Authen(3)
 
 =head1 AUTHOR
 
-Lincoln Stein <lstein@w3.org>
+Lincoln Stein <lstein@cshl.org>
 
 Copyright (c) 1997, Lincoln D. Stein
 
@@ -404,477 +898,3 @@ it under the same terms as Perl itself.
 
 =cut
 
-
-sub open {
-    my $class = shift;
-    my ($realm,$config,$rest) = rearrange([ REALM,[CONFIG_FILE,CONFIG]],@_);
-    croak "Must provide the path to a config file" unless -r $config;
-    my $realms = new HTTPD::Realm(-config_file=>$config,%$rest);
-    return undef unless $realms;
-    my $r = $realms->realm($realm);
-    return undef unless $r;
-    return $realms->dbm(-realm=>$r,%$rest);
-}
-
-sub new {
-    my $class = shift;
-    my ($realm,$mode,$writable,$server) = rearrange([ REALM, MODE, [WRITE,WRITABLE], SERVER ],@_);
-    croak "Must provide a valid realm object" unless $realm && ref($realm);
-    my $self = {
-	'realm'=>$realm,
-	'mode'=>$mode || 0644,
-	'writable'=>$writable,
-	'server'=>$server,
-    };
-    bless $self,$class;
-    return undef unless $self->open_passwd;
-    return undef unless $self->open_group;
-    return $self;
-}
-
-sub open_passwd {
-    my $self = shift;
-    my $realm = $self->{realm};
-
-    # Create the right kind of HTTPD::UserAdmin and HTTPD::GroupAdmin objects.
-    my %params;
-    $params{DB} = $realm->userdb;
-    $params{Encrypt} = $realm->crypt;
-    $params{Server} = $self->{server};
-    $params{Flags} = $self->{writable} ? 'rwc' : 'r';
-    $params{Mode} = $self->{mode};
-    $params{Locking} = $self->{writable};
-    if ($realm->crypt() =~ /MD5/) {
-	$params{Encrypt} = 'MD5';
-	$self->{digest}++;
-    }
-
-    my $userType = $realm->usertype;
-  CASE: {
-      do { $params{DBType} = 'Text'; next; }    if $userType=~/text|file/i;
-      do { $params{DBType} = 'DBM'; 
-	   $params{DBMF} = "\U$userType\E"; 
-	   $params{DBMF} = 'NDBM' if $params{DBMF} eq 'DBM';
-	   next; }                              if $userType =~ /^(NDBM|GDBM|DB|DBM|SDBM|ODBM)$/;
-      do { 
-	   my $p = $realm->SQLdata;
-	   $params{DB} = $p->{database};
-	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
-	   $params{DBType} = 'SQL';
-	   $params{Driver} = $realm->driver;
-#
-# do what Lincoln didn't:
-           $params{User} = $p->{dblogin};
-           $params{Auth} = $p->{dbpassword};
-           $params{DEBUG} = 0;
-#
-	   $params{UserTable} = $p->{usertable};
-	   $params{NameField} = $p->{userfield};
-	   $params{PasswordField} = $p->{passwdfield};
-	   next; }                              if $userType=~/sql/i;
-  }
-
-    my $return = eval <<'END';
-    use HTTPD::UserAdmin 1.50;
-    $self->{userDB} = new HTTPD::UserAdmin(%params);
-END
-    ;
-    $ERROR = $@ unless $return;
-    return $return;
-}
-
-sub errstr {
-    return $ERROR;
-}
-
-sub open_group {
-    my $self = shift;
-    my $realm = $self->{realm};
-    return 1 unless $realm->groupdb;
-    
-    my %params;
-    $params{DB} = $realm->groupdb;
-    $params{Server} = $self->{server};
-    $params{Flags} = $self->{writable} ? 'rwc' : 'r';
-    $params{Mode} = $self->{mode};
-    $params{Locking} = $self->{writable};
-    my $groupType = $realm->grouptype;
-
-  CASE: {
-      do { $params{DBType} = 'Text'; next }    if $groupType=~/text|file/i;
-      do {
-	  $params{DBType} = 'DBM';
-	  $params{DBMF} = "\U$groupType\E";
-	  $params{DBMF} = 'NDBM' if $params{DBMF} eq 'DBM';
-	  next }                              if $groupType =~ /^(NDBM|GDBM|DB|DBM|SDBM|ODBM)$/;
-      do { 
-	  my $p = $realm->SQLdata;
-	  $params{DB} = $p->{database};
-	   $params{Host} = $p->{host} eq 'localhost' ? '' : $p->{host};
-	  $params{DBType} = 'SQL';
-	  $params{Driver} = $realm->driver;
-#
-# do what Lincoln didn't:
-           $params{User} = $p->{dblogin};
-           $params{Auth} = $p->{dbpassword};
-           $params{DEBUG} = 0;
-#
-	  $params{GroupTable} = $p->{grouptable};
-	  $params{NameField} = $p->{groupuserfield} || $p->{userfield};
-	  $params{GroupField} = $p->{groupfield};
-	  $params{UserTable} = $p->{usertable};  # needed for obscure reasons
-	  next; }                              if $groupType=~/sql/i;
-  }
-    my $return = eval<<'END';
-    use HTTPD::GroupAdmin 1.50;
-    $self->{groupDB} = new HTTPD::GroupAdmin(%params);
-END
-    ;
-    $ERROR = $@ unless $return;
-    return $return;
-}
-
-
-sub users {
-    my $self = shift;
-    return $self->{userDB}->list();
-}
-
-# Return true if a user is in a particular group
-sub match_group {
-    my $self = shift;
-    my ($user,$group) = rearrange([[USER,NAME],[GROUP,GRP]],@_);
-    croak "Must provide a user name" unless $user;
-    croak "Must provide a group name" unless $group;
-    return undef unless $self->{groupDB};
-
-    # Slightly different if we're using a DBM file.
-    # Result of inconsistencies in HTTPD::GroupAdmin
-    my %users;
-    grep ($users{$_}++,$self->{groupDB}->list($group));
-    return $users{$user};
-}
-
-sub open_writable {
-    my $self = shift;
-    return 1 if $self->{writable};
-    $self->{writable}++;
-    if ($self->{userDB}) {
-	$self->{userDB}->commit();
-	$self->{userDB}->close();
-	unless ($self->open_passwd()) {
-	    $ERROR = "Unable to open user file for writing";
-	    return undef;
-	}
-    }
-    if ($self->{groupDB}) {
-	$self->{groupDB}->commit();
-	$self->{groupDB}->close();
-	unless ( $self->open_group() ) {
-	    $ERROR = "Unable to open group file for writing";
-	    return undef;
-	}
-    }
-    1;
-}
-
-sub set_passwd {
-    my $self = shift;
-    my ($user,$passwd,$otherfields) = rearrange([[USER,NAME],[PASSWORD,PASSWD],[OTHER,GCOS,FIELDS,VALUES] ],@_);
-    croak "Must provide a user ID" unless $user;
-    croak "Must provide a password or field values" unless $passwd || $otherfields;
-    return undef unless $self->{userDB};
-
-    # reopen if necessary
-    return undef unless $self->open_writable();
-
-    #special passwords for the digest method
-    $passwd = "$user:$self->{realm}:$passwd" if $passwd && $self->{digest};
-    
-    my @other = ();
-    my $result;
-    if (defined($otherfields)) {
-	@other = ref($otherfields) eq 'ARRAY' ? @$otherfields : ($otherfields) ;
-    }
-
-    if ($self->{userDB}->exists($user)) {
-
-	# nasty hack here to avoid problems in the way that UserAdmin does its 
-        # updates (first it deletes, then it adds!)
-	my($crypt) = '';
-	unless ($passwd) {
-	    ($crypt,$self->{userDB}->{ENCRYPT}) = ($self->{userDB}->{ENCRYPT},'none');
-	    $passwd = $self->passwd($user);
-	}
-
-	@other = $self->get_fields($user) unless @other;
-	($result,$ERROR) = $self->{userDB}->update($user,$passwd,@other);
-	$self->{userDB}->{ENCRYPT} = $crypt if $crypt;
-	return $result unless $result;
- 
-   } else {
-
-	($result,$ERROR) = $self->{userDB}->add($user,$passwd,@other);
-	return $result unless $result;
-
-    }
-    ($result,$ERROR) = $self->{userDB}->commit();
-    return $result;
-}
-
-sub set_password { &set_passwd; }
-
-sub set_fields {
-    my $self = shift;
-    my ($user,$fields) = rearrange([[USER,NAME],[OTHER,GCOS,FIELD,FIELDS,VALUES] ],@_);
-    croak "Must provide a user ID" unless $user;
-    croak "Must provide field values" unless $fields;
-    my $current = $self->get_fields(-user=>$user);
-    foreach (keys %$fields) {
-	$current->{$_} = $fields->{$_};
-    }
-    return $self->set_passwd(-user=>$user,-fields=>$current);
-}
-
-# return true if passwords match
-sub match_passwd {
-    my $self = shift;
-    my ($user,$passwd) = rearrange([[USER,NAME],[PASSWD,PASSWORD]],@_);
-    croak "Must provide a user ID" unless $user;
-    croak "Must provide a password" unless $passwd;
-    return undef unless $self->{userDB}->exists($user);
-    $passwd = "$user:$self->{realm}:$passwd" if $self->{digest};
-    my $stored_passwd = $self->{userDB}->password($user);
-    if ($self->{userDB}->{ENCRYPT} eq 'crypt') {
-	return crypt($passwd,$stored_passwd) eq $stored_passwd;
-    } else {
-	return $self->{userDB}->encrypt($passwd) eq $stored_passwd;
-    }
-}
-
-# shortcut for match_passwd
-sub match { &match_passwd; }
-
-sub passwd {
-    my $self = shift;
-    my ($user,$passwd) = rearrange([[USER,NAME],[PASSWORD,PASSWD]],@_);
-    croak "Must provide a user ID" unless $user;
-    if ($passwd) { return $self->match_passwd('-user'=>$user,'-passwd'=>$passwd) };
-    return undef unless $self->{userDB}->exists($user);
-    my (@pw) = split(/:/,$self->{userDB}->password($user));
-    return $pw[1] if $self->{digest};
-    return $pw[0];
-}
-
-sub password { &passwd; }
-
-sub delete_user {
-    my $self = shift;
-    my ($user) = rearrange([[USER,NAME]],@_);
-    croak "Must provide a user ID" unless $user;
-    return undef unless $self->open_writable();
-
-    $self->{userDB}->delete($user) if $self->{userDB};    
-    return unless $self->{groupDB};
-
-    my $group;
-    foreach $group ($self->{groupDB}->list) {
-	$self->{groupDB}->delete($user,$group);
-    }
-    my $result;
-    ($result,$ERROR) = $self->{groupDB}->commit();
-    return $result unless $result;
-    ($result,$ERROR) = $self->{userDB}->commit();
-    return $result;
-}
-
-# With one argument returns the groups that the user is in.
-# With two arguments returns true if user is in the group
-sub group {
-    my $self = shift;
-    my ($user,$group) = rearrange([[USER,NAME],[GROUP,GRP]],@_);
-    croak "Must provide a user ID" unless $user;
-    if ($group) { return $self->match_group('-user'=>$user,'-group'=>$group) };
-    return () unless my $db = $self->{groupDB};
-
-    # Shortcut to avoid doing and undoing unnecessary work.
-    if (ref($db)=~/DBM::apache/) {
-      # check for Apache's weird combined user/group database format
-      return $self->{groupDB}->{DB} eq $self->{userDB}->{DB}
-	 ? split(',',(split(':',$db->{'_HASH'}->{$user}))[1])
-	   : split(',',$db->{'_HASH'}->{$user});
-    }
-
-    my ($g,%groups);
-    foreach $g ($self->{groupDB}->list) {
-	my %user;
-	grep($user{$_}++,$self->{groupDB}->list($g));
-	$groups{$g}++ if $user{$user};
-    }
-    return keys %groups;
-}
-
-sub groups {
-    my $self = shift;
-    return () unless $self->{groupDB};
-    return $self->{groupDB}->list();
-}
-
-sub members {
-    my $self = shift;
-    my ($group) = rearrange([[GROUP,GRP]],@_);
-    $group || croak "Must provide a group name";
-    return () unless $self->{groupDB};
-    return $self->{groupDB}->list($group);
-}
-
-sub set_group {
-    my $self = shift;
-    my ($user,$groups) = rearrange([[USER,NAME],[GROUP,GRP]],@_);
-    croak "Must provide a user ID" unless $user;
-    my $db;
-    
-    # reopen if necessary
-    return undef unless $self->open_writable();
-
-    return unless $db = $self->{groupDB};
-    my (@groups) = ref($groups) ? @$groups : ($groups);
-
-    # Shortcut to avoid doing and undoing work.
-    if (ref($db)=~/DBM::apache/) {
-	$db->{'_HASH'}->{$user}=join(',',@groups);
-	$self->remove_dangling_groups();
-	return 1;
-    }
-
-    # otherwise we do it the "correct" way
-    my (%current,%new);
-    grep ($current{$_}++,$self->group($user));
-    grep ($new{$_}++,@groups);
-
-    my (@to_remove) = grep (!$new{$_},keys %current);
-    my (@to_add) = grep (!$current{$_},keys %new);
-    foreach (@to_remove) {
-	$db->delete($user,$_);
-    }
-    foreach (@to_add) {
-	$db->add($user,$_);
-    }
-
-    $self->remove_dangling_groups();
-    my $result;
-    ($result,$ERROR) = $db->commit();
-    return $result;
-}
-
-sub delete_group {
-    my $self = shift;
-    my ($group) = rearrange([[GROUP,GRP]],@_);
-    $group || croak "Must provide a group name";
-    return 1 unless $self->{groupDB};
-    return undef unless $self->open_writable();
-
-    $self->{groupDB}->remove($group);
-    my $result;
-    ($result,$ERROR) = $self->{groupDB}->commit();
-    return $result;
-}
-
-sub remove_dangling_groups {
-    my $self = shift;
-    my $grp;
-    foreach $grp ($self->groups) {
-	next unless $grp;
-	$self->delete_group($grp) 
-	    unless $self->members('-group'=>$grp);
-    }
-}
-
-# Fetch field names from a SQL database.
-# Only those fields that are returned by fields() are accessible.
-# The return value is an associative array in which the keys are the
-# field names and the values are the field types (s=string, i=integer, f=real).
-sub fields {
-    my $realm = shift->{realm};
-    my $fields;
-    return () unless $fields = $realm->fields;
-    my @f = split(/\s+/,$fields);
-    my %f;
-    foreach (@f) {
-	my($name,$type) = split(':');
-	$f{$name} = $type || 's';  # string by default
-    }
-    return %f;
-}
-
-# Fetch the named fields from an SQL database.
-# Input is a user ID and a reference to a list of field names.  All fields will be
-# returned if no list specified.
-# The return value is a hash of the fields, or a reference to the hash in a scalar
-# context. 
-sub get_fields {
-    my $self = shift;
-    my ($user,$fields) = rearrange([[USER,NAME],[FIELDS,FIELD,VALUE,VALUES]],@_);
-    croak "Must provide a user ID" unless $user;
-
-    my (%ok) = $self->fields;
-    my (@fields);
-    if (defined($fields)) {
-	@fields = grep ($ok{$_},@$fields);
-    } else {
-	@fields = keys %ok;
-    }
-    $self->{userDB}->fetch($user,@fields);
-}
-
-sub error {
-    return $ERROR;
-}
-
-sub DESTROY {
-    my $self = shift;
-    do { $self->{userDB}->commit; $self->{userDB}->close() }   if $self->{userDB};
-    do { $self->{groupDB}->commit; $self->{groupDB}->close() } if $self->{groupDB};
-}
-
-# -------- exported utility routine ----------
-sub rearrange {
-    my($order,@param) = @_;
-    return () unless @param;
-    
-    return @param unless (defined($param[0]) && substr($param[0],0,1) eq '-');
-
-    my $i;
-    for ($i=0;$i<@param;$i+=2) {
-	$param[$i]=~s/^\-//;     # get rid of initial - if present
-	$param[$i]=~tr/a-z/A-Z/; # parameters are upper case
-    }
-    
-    my(%param) = @param;                # convert into associative array
-    my(@return_array);
-    
-    local($^W) = 0;
-    my($key)='';
-    foreach $key (@$order) {
-	my($value);
-	if (ref($key) eq 'ARRAY') {
-	    foreach (@$key) {
-		last if defined($value);
-		$value = $param{$_};
-		delete $param{$_};
-	    }
-	} else {
-	    $value = $param{$key};
-	    delete $param{$key};
-	}
-	push(@return_array,$value);
-    }
-    push (@return_array,{%param}) if %param;
-    return (@return_array);
-}
-
-sub realm {
-    return shift->{realm};
-}
-
-1;

@@ -1,10 +1,12 @@
 # $Id: AdminBase.pm,v 1.16 1998/01/09 12:43:09 lstein Exp $
 package HTTPD::AdminBase;
+use strict;
+
 use Carp ();
 use Fcntl ();
 use Symbol qw(gensym);
 use File::Basename;
-use strict;
+use Fcntl qw(:DEFAULT :flock);
 use vars qw($VERSION);
 $VERSION = (qw$Revision: 1.16 $)[1];
 
@@ -154,10 +156,10 @@ my(%DBMFlags) = (
 		 r   => sub { GDBM_File::GDBM_READER() },
 	     },
 	     DEFAULT => { 
-		 rwc => sub { Fcntl::O_RDWR()|Fcntl::O_CREAT() },
-		 rw  => sub { Fcntl::O_RDWR() },
-		 w   => sub { Fcntl::O_WRONLY() },
-		 r   => sub { Fcntl::O_RDONLY() },
+		 rwc => sub { O_RDWR|O_CREAT },
+		 rw  => sub { O_RDWR },
+		 w   => sub { O_WRONLY },
+		 r   => sub { O_RDONLY },
 	     },
 );
 
@@ -173,12 +175,6 @@ sub _dbm_init {
     @{$self}{qw(_DBMPACK _FLAGS)} = ($dbmpack, $self->flags);
     1;
 }
-
-#stuff for locking
-#File::Lock would be nice to have standard
-
-#use Fcntl qw(F_WRLCK F_SETLK F_UNLCK);
-my ($LOCK_SH, $LOCK_EX, $LOCK_UN, $LOCK_NB) = (1,2,8,4);
 
 sub lock {
     my($self,$timeout,$file) = @_;
@@ -198,10 +194,10 @@ sub lock {
     }
 
     $file =~ /^([^<>;|]+)$/ or Carp::croak("Bad file name '$file'"); $file = $1; #untaint
-    
-    open($FH, ">>$file") || Carp::croak("can't open '$file' $!");
 
-    while(! flock($FH, $LOCK_EX|$LOCK_NB) ) {
+    open($FH, ">$file") || Carp::croak("can't open '$file' $!");
+
+    while(! flock($FH, LOCK_EX|LOCK_NB) ) {
 	sleep 1;
 	if(--$timeout < 0) {
 	    print STDERR "lock: timeout, can't lock $file \n";
@@ -216,7 +212,7 @@ sub unlock {
     my($self) = @_;
     return 1 unless $self->{LOCKING};
     my $FH = $self->{'_LOCKFH'};
-    flock($FH, $LOCK_UN);
+    flock($FH, LOCK_UN);
     CORE::close($FH);
     unlink $self->{'_LOCKFILE'};
     print STDERR "unlock-> $self->{'_LOCKFILE'}\n" if $Debug;

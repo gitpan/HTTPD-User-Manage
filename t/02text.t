@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl -w
 
-use lib qw(blib ../blib ../../blib lib);
+use lib qw(blib/lib ../blib/lib ../../blib/lib);
 use HTTPD::RealmManager;
 
 BEGIN {
@@ -28,8 +28,8 @@ test 3,$db->passwd('lincoln');
 test 4,$db->match(-user=>'lincoln',-passwd=>'xyzzy');
 test 5,$fields = $db->get_fields(-user=>'lincoln');
 test 6,$fields->{age} == 37;
+$db->close;
 
-undef $db;
 test 7,$db = HTTPD::RealmManager->open(-config=>'./t/realms.conf',
 	                               -realm=>'main');
 test 8,$db->match(-user=>'lincoln',-passwd=>'xyzzy');

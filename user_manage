@@ -1,7 +1,7 @@
-#!/usr/local/bin/perl
+#!/usr/bin/perl
 
 use HTTPD::Realm 1.5
-$VERSION = 1.57;
+$VERSION = 1.58;
 
 # Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
 # permit textarea boxes as well as simple text boxes. The fields tag
@@ -33,7 +33,7 @@ $VERSION = 1.57;
 
 # Path to our configuration file.  Change as appropriate for
 # your site.
-$CONFIG_FILE = '/etc/httpd/conf/realms.conf';
+$CONFIG_FILE = './t/realms.conf';
 
 # Set this to the name of your server.  Only 'apache' is guaranteed
 # to work. 'ncsa' and 'netscape' might work too -- you'll have to try.
@@ -525,7 +525,7 @@ sub generate_user_page {
 		      )
 		),
        $other_fields ? (p(),$other_fields) : (),
-       reset(-value=>'Reset Values'),
+       CGI::reset(-value=>'Reset Values'),
        submit(-name=>'action',-value=>'Set Values'),
        end_form();
 
@@ -618,11 +618,12 @@ sub do_info {
     $user = $user || prompt('User name: ');
     my (@args);
 
-    @info = prompt("Enter comma-separated list of field=value pairs for $user: ") 
+    @info = prompt("Enter comma-separated list of field=value pairs for $user: ")
 	unless @info;
     die "No info given.\n" unless @info;
 
     @info = map { split('\s*,\s*') } @info;
+    warn "@info";
 
     die "$user is not in users database.\n" 
 	unless my $passwd = $db->passwd($user);
