@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 use HTTPD::Realm 1.5
-$VERSION = 1.61;
+$VERSION = 1.62;
 
 # Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
 # permit textarea boxes as well as simple text boxes. The fields tag
@@ -75,6 +75,11 @@ $CREATE_MODE = 0644;		# -rw-r--r--
 # 'stty' program on your system (it's used to turn off line echo
 # when entering passwords.)
 $STTY = '/bin/stty';
+
+# Log file where all changes are recorded
+# If false, no audit log is kept
+#$AUDITLOG = './t/var/account.log';
+$AUDITLOG = '';
 
 ###########################################################################
 # ------------------- NO USER SERVICEABLE PARTS BELOW ---------------------
@@ -213,6 +218,7 @@ sub change_password {
 
     # If we get here then it's OK to change the password.
     if ($db->set_passwd(-user=>$user,-passwd=>$password1)) {
+    &audit_trail( "web $user: changed own password" );
 	print h2('Password changed'),
 	    "Password for $user has been changed.",
 	    hr();
@@ -303,7 +309,7 @@ sub do_administration {
 	                    generate_user_page($db,$user),
 	                    last SWITCH;
 
-	/delete/i       and delete_user($db,$user),
+	/delete/i       and delete_user($db,$admin,$user),
 	                    generate_user_list($db),
 	                    last SWITCH;
 
@@ -320,15 +326,9 @@ sub do_administration {
 }
 
 sub delete_user {
-    my ($db,$user) = @_;
-    if ($PROTECT_ADMINS && $db->match_group($user, $ADMIN_GROUP)) {
-	error_msg('Error Deleting User',
-		'User ', em($user), ' is member of group ', 
-		em($ADMIN_GROUP), ' and cannot be deleted.');
-	print hr();
-	return;
-    }
+    my ($db,$admin,$user) = @_;
     if ($db->delete_user($user)) {
+    &audit_trail( "web $admin: deleted user '$user'" );
 	print h1('User Deleted'),
           "The entry for user ",em($user)," was successfully deleted.",
           hr();
@@ -341,7 +341,6 @@ sub delete_user {
 	print hr();
 	return undef;
     }
-    
 }
 
 sub set_user {
@@ -386,6 +385,7 @@ sub set_user {
 	    print hr();
 	    return undef;
 	}
+    &audit_trail("web $admin: changed password for user '$user'");
     }
 
     # If the groups are different from the current entry, then we
@@ -410,12 +410,14 @@ sub set_user {
 	    print hr();
 	    return undef;
 	}
+    &audit_trail("web $admin: changed groups for user '$user' to '".join(",",@groups)."'");
     }
 
     # If the info is different from the current entry, then we need
     # to set that too.
     if (my %fields = $db->fields) {
 	my $update = 0;
+    my @audit_info;
 	my $info = $db->get_fields(-name=>$user,-fields=>[keys %fields]);
 	foreach (keys %fields) {
 	    my $new = param("F_$_");
@@ -423,8 +425,13 @@ sub set_user {
 	    undef $new if $fields{$_}=~/^f/ && $new!~/^-?[\dEe.]+$/;
 	    $update++ if defined($new)  && $new ne $info->{$_};
 	    $info->{$_} = $new;
+        push( @audit_info, "$_=$new");
 	}
-	$db->set_passwd(-user=>$user,-fields=>$info) if $update;
+    if (   $update
+        && $db->set_passwd(-user=>$user,-fields=>$info) ) {
+
+    &audit_trail("web $admin: changed info for user '$user' to '".join(",",@audit_info)."'");
+	}
     }
 
     # If we get here, then all is well.
@@ -590,6 +597,7 @@ sub generate_user_page {
 sub dbm_manage {
 
     my ($realm,$help);
+    my $admin = getpwuid($<);
 
     # process command line
     while ($ARGV[0] && $ARGV[0] =~ /^-/) {
@@ -645,11 +653,11 @@ USAGE
     $_ = $command;
   SWITCH: 
     {
-	/add|edit/i   and  do_add($db,@rest),last SWITCH;
-	/delete/i     and  do_delete($db,@rest),last SWITCH;
+	/add|edit/i   and  do_add($db,$admin,@rest),last SWITCH;
+	/delete/i     and  do_delete($db,$admin,@rest),last SWITCH;
 	/realm/i      and  do_realm(),last SWITCH;
-	/group/i      and  do_group($db,@rest),last SWITCH;
-	/info/i       and  do_info($db,@rest),last SWITCH;
+	/group/i      and  do_group($db,$admin,@rest),last SWITCH;
+	/info/i       and  do_info($db,$admin,@rest),last SWITCH;
 	/view|list/i  and  do_view($db,@rest),last SWITCH;
         /format/i     and  do_format( $REALMS->realm($realm) ),last SWITCH;
         /setup/i      and  do_setup( $db,$REALMS->realm($realm) ),last SWITCH;
@@ -658,7 +666,7 @@ USAGE
 }
 
 sub do_info {
-    my($db,$user,@info) = @_;
+    my($db,$admin,$user,@info) = @_;
     $user = $user || prompt('User name: ');
     my (@args);
 
@@ -677,12 +685,14 @@ sub do_info {
 	my($n,$v) = split('=');
 	$info{$n}=$v;
     }
+	if ( $db->set_passwd(-user=>$user,-passwd=>$passwd,-fields=>\%info)) {
+    &audit_trail("cmd $admin: changed info for user '$user' to '@info'");
     print "Info successfully changed for $user.\n"
-	if $db->set_passwd(-user=>$user,-passwd=>$passwd,-fields=>\%info);
+    }
 }
 
 sub do_add {
-    my($db,$user,$password,$groups,$info) = @_;
+    my($db,$admin,$user,$password,$groups,$info) = @_;
     my(@args);
     $user = $user || prompt('User name: ');
     push(@args,'-user'=>$user);
@@ -709,11 +719,11 @@ sub do_add {
     @groups = () if $groups[0]=~/^(-|''|"")$/;
     print "Group set to @groups.\n"
 	if @groups && $db->set_group(-user=>$user,-group=>\@groups);
-
+    &audit_trail("cmd $admin: add user '$user' groups '$groups' info '$info'");
 }
 
 sub do_delete {
-    my($db,@user) = @_;
+    my($db,$admin,@user) = @_;
     @user = prompt('User name: ') 
 	unless @user;
     my $user;
@@ -726,12 +736,13 @@ sub do_delete {
 	    print "$user: delete unsuccessful.\n";
 	    next;
 	}
+    &audit_trail("cmd $admin: deleted user '$user'");
 	print "$user deleted.\n";
     }
 }
 
 sub do_group {
-    my($db,$user,@group) = @_;
+    my($db,$admin,$user,@group) = @_;
     $user = $user || prompt('User name: ');
     die "$user is not in users database.\n" unless $db->passwd($user);
 
@@ -742,6 +753,7 @@ sub do_group {
     @group = () if $group[0]=~/^(-|''|"")$/;
     
     die "Attempt to set groups failed.\n" unless $db->set_group(-user=>$user,-group=>\@group);
+    &audit_trail("cmd $admin: changed groups for user '$user' to '@group'");
     print "Groups set for $user.\n";
 }
 
@@ -975,6 +987,23 @@ sub password_prompt {
     } until $pw1 eq $pw2;
     system "$STTY -cbreak echo >/dev/tty";	# turn on echo
     return $pw1;
+}
+
+sub audit_trail {
+    return unless $AUDITLOG;
+    my $entry = shift;
+    my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday) = gmtime(time);
+    $year += 1900;
+    $mon += 1;
+    my $when = sprintf("%4d-%02d-%02d %02d:%02d:%02d",
+                       $year, $mon, $mday, $hour, $min, $sec
+                       );
+    if ( open( AUDITLOG, ">>$AUDITLOG" )) {
+        print AUDITLOG "$when : $entry\n";
+        close AUDITLOG;
+    } else {
+        print STDERR "Failed to open audit log '$AUDITLOG'\n$!\n";
+    }
 }
 
 # These useless lines avoid "possible typo" warnings

@@ -33,3 +33,4 @@ t/04db.t
 t/realms.conf
 user_manage
 user_manage.html
+META.yml                                 Module meta-data (added by MakeMaker)
