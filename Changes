@@ -1,3 +1,7 @@
+1.59	Fri May 31 19:03:45 EDT 2002
+	-Fix to MD5 hash config in UserAdmin.pm.  CGI interface was
+	never working with MD method.  Patch provided by Jarrod Teale.
+
 1.58	Mon Feb 19 22:53:42 EST 2001
 	-Fixes for locking/unlocking problems (which caused test 02 to fail)
 	-Cleaned up user_manage code slightly

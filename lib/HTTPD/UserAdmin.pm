@@ -5,7 +5,7 @@ use Carp ();
 use strict;
 use vars qw($VERSION @ISA);
 @ISA = qw(HTTPD::AdminBase);
-$VERSION = 1.50;
+$VERSION = 1.51;
 
 sub delete {
     my($self, $user) = @_;
@@ -96,7 +96,8 @@ sub password {
     my $self = shift;
     my $val = $self->exists(@_);
     my($x,$y,$z) = split(':',$val);
-    return join(':',$x,$y,$z) if $self->{ENCRYPT} eq 'MD5';
+    return defined($z) ? join(':',$x,$y,$z) : join(':',$x,$y)
+	if $self->{ENCRYPT} eq 'MD5';
     return $x;
 }
 
