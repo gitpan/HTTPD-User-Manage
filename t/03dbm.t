@@ -4,12 +4,13 @@ use lib ('../blib/lib','./blib/lib');
 use HTTPD::RealmManager;
 
 BEGIN {
-    unlink <'./dbm.passwd*'>;
-    unlink <'./dbm.group*'>;
+    unlink <./dbm.passwd*>;
+    unlink <./dbm.group*>;
 }
+
 END {
-    unlink <'./dbm.passwd*'>;
-    unlink <'./dbm.group*'>;
+    unlink <./dbm.passwd*>;
+    unlink <./dbm.group*>;
 }
 
 sub test {
@@ -17,7 +18,6 @@ sub test {
     my($num, $true,$msg) = @_;
     print($true ? "ok $num\n" : "not ok $num $msg\n");
 }
-
 
 unless (eval { require NDBM_File } ) {
   print "1..0 # Skipped: no NDBM module installed\n";
@@ -50,3 +50,4 @@ test 12,$db->group(-user=>'anne',-group=>'authors');
 test 13,join(' ',sort $db->group('lincoln')) eq 'administrators authors users';
 test 14,join(' ',sort $db->members('authors')) eq 'anne lincoln';
 
+exit 0;

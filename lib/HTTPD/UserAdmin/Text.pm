@@ -1,11 +1,11 @@
-# $Id: Text.pm,v 1.2 1997/12/12 01:52:23 lstein Exp $
+# $Id: Text.pm,v 1.1.1.1 2001/02/20 03:19:07 lstein Exp $
 package HTTPD::UserAdmin::Text;
 use HTTPD::UserAdmin ();
 use Carp ();
 use strict;
 use vars qw(@ISA $DLM $VERSION);
 @ISA = qw(HTTPD::UserAdmin::DBM HTTPD::UserAdmin);
-$VERSION = (qw$Revision: 1.2 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 $DLM = ":";
 
 my %Default = (PATH => ".", 

@@ -1,4 +1,4 @@
-# $Id: UserAdmin.pm,v 1.17 1998/01/09 12:43:26 lstein Exp $
+# $Id: UserAdmin.pm,v 1.1.1.1 2002/05/31 23:03:35 lstein Exp $
 package HTTPD::UserAdmin;
 use HTTPD::AdminBase ();
 use Carp ();

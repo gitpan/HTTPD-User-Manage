@@ -1,10 +1,10 @@
-# $Id: Text.pm,v 1.13 1997/12/12 01:54:37 lstein Exp $
+# $Id: Text.pm,v 1.1.1.1 2000/12/01 16:24:40 lstein Exp $
 package HTTPD::GroupAdmin::Text;
 use Carp ();
 use strict;
 use vars qw(@ISA $DLM $VERSION $LineMax);
 @ISA = qw(HTTPD::GroupAdmin);
-$VERSION = (qw$Revision: 1.13 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 $DLM = ": ";
 
 # Maximum size of each line in the group file.  Anytime we have more 

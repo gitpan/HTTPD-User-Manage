@@ -1,10 +1,10 @@
-# $Id: DBM.pm,v 1.15 1997/12/23 11:14:48 lstein Exp $
+# $Id: DBM.pm,v 1.1.1.1 1997/12/23 11:14:48 lstein Exp $
 package HTTPD::GroupAdmin::DBM;
 use vars qw(@ISA $DLM $VERSION);
 use strict;
 use Carp ();
 @ISA = qw(HTTPD::GroupAdmin);
-$VERSION = (qw$Revision: 1.15 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 $DLM = " ";
 
 my %Default = (PATH => ".",

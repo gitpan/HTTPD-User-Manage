@@ -1,11 +1,11 @@
-# $Id: DBM.pm,v 1.17 1997/12/30 13:37:29 lstein Exp $
+# $Id: DBM.pm,v 1.1.1.1 2001/02/20 03:33:50 lstein Exp $
 package HTTPD::UserAdmin::DBM;
 use HTTPD::UserAdmin ();
 use Carp ();
 use strict;
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::UserAdmin);
-$VERSION = (qw$Revision: 1.17 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 my %Default = (PATH => ".",
 	       DB => ".htpasswd",

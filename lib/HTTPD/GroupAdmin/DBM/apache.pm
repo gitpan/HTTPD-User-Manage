@@ -1,11 +1,11 @@
-# $Id: apache.pm,v 1.3 1997/12/12 01:55:14 lstein Exp $
+# $Id: apache.pm,v 1.1.1.1 2000/12/14 16:41:42 lstein Exp $
 package HTTPD::GroupAdmin::DBM::apache;
 # Modified 10 Oct 1996, by Alex Wong <alexw@toolshed.org>
 use Carp ();
 use strict;
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::GroupAdmin::DBM);
-$VERSION = (qw$Revision: 1.3 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 sub add {
     my($self,$uid,$group) = @_;

@@ -4,12 +4,12 @@ use lib ('./lib','./blib');
 use HTTPD::RealmManager;
 
 BEGIN {
-    unlink <'./db.passwd*'>;
-    unlink <'./db.group*'>;
+    unlink <./db.passwd*>;
+    unlink <./db.group*>;
 }
 END {
-    unlink <'./db.passwd*'>;
-    unlink <'./db.group*'>;
+    unlink <./db.passwd*>;
+    unlink <./db.group*>;
 }
 
 sub test {

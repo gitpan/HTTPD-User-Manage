@@ -1,8 +1,8 @@
-# $Id: cern.pm,v 1.1 1997/12/11 21:44:30 lstein Exp $
+# $Id: cern.pm,v 1.1.1.1 1997/12/11 21:44:35 lstein Exp $
 package HTTPD::GroupAdmin::Text::cern;
 use Carp;
 @ISA = qw(HTTPD::GroupAdmin::Text::_generic);
-$VERSION = (qw$Revision: 1.1 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 $DLM = ": ";
 

@@ -1,4 +1,4 @@
-# $Id: netscape.pm,v 1.2 1998/01/13 12:57:53 lstein Exp $
+# $Id: netscape.pm,v 1.1.1.1 1998/01/13 12:57:53 lstein Exp $
 
 # Define a subclass of DB_File that null-terminates strings
 package DBNull_File;
@@ -65,7 +65,7 @@ use Carp ();
 use strict;
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::UserAdmin::DBM);
-$VERSION = (qw$Revision: 1.2 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 my %Default = (PATH => ".",
 	       DB => ".htpasswd",

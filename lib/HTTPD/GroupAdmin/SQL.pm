@@ -1,11 +1,11 @@
-# $Id: SQL.pm,v 1.4 1997/12/12 16:05:04 lstein Exp $
+# $Id: SQL.pm,v 1.1.1.1 1997/12/12 16:05:04 lstein Exp $
 package HTTPD::GroupAdmin::SQL;
 use strict;
 use DBI;
 use Carp ();
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::GroupAdmin);
-$VERSION = (qw$Revision: 1.4 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 my %Default = (
 	       HOST => "",                  #server hostname

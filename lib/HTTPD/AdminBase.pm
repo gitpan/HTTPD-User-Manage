@@ -1,4 +1,4 @@
-# $Id: AdminBase.pm,v 1.16 1998/01/09 12:43:09 lstein Exp $
+# $Id: AdminBase.pm,v 1.1.1.1 2001/02/20 02:32:11 lstein Exp $
 package HTTPD::AdminBase;
 use strict;
 
@@ -8,7 +8,7 @@ use Symbol qw(gensym);
 use File::Basename;
 use Fcntl qw(:DEFAULT :flock);
 use vars qw($VERSION);
-$VERSION = (qw$Revision: 1.16 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 #generic contructor stuff
 

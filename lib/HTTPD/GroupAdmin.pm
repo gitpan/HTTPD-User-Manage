@@ -1,4 +1,4 @@
-# $Id: GroupAdmin.pm,v 1.18 1998/01/13 12:55:45 lstein Exp $
+# $Id: GroupAdmin.pm,v 1.1.1.1 1998/01/13 12:55:45 lstein Exp $
 
 package HTTPD::GroupAdmin;
 use HTTPD::AdminBase ();

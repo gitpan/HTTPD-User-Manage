@@ -3,7 +3,7 @@ use HTTPD::UserAdmin ();
 use strict;
 use vars qw($VERSION @ISA $Debug);
 $Debug = 0;
-$VERSION = (qw$Revision: 1.12 $)[1];
+$VERSION = (qw$Revision: 1.1.1.1 $)[1];
 
 sub new {
     my($class) = shift;
