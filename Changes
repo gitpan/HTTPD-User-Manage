@@ -1,8 +1,14 @@
+1.63 Mon Nov 14 16:37:15 EST 2005
+	- Fixed cross-site scripting bug reported by JPCERT/CC Vulnerability Handling Team <vuls@jpcert.or.jp>
+		[TN: JPCERT#96622935]
+
 1.62 Fri Jun 11 09:51:32 EDT 2004
 	- Patches from Scott Lawrence to support an audit log.
+
 1.61    
 	- Patches from Peter Marschall to support flexible DBMS searches.
 	- Patch from Andrew Hollenbeck to catch filesystem errors during commits of text files.
+
 1.59	Fri May 31 19:03:45 EDT 2002
 	-Fix to MD5 hash config in UserAdmin.pm.  CGI interface was
 	never working with MD method.  Patch provided by Jarrod Teale.
