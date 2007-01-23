@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 use HTTPD::Realm 1.5
-$VERSION = 1.65;
+$VERSION = 1.66;
 
 # Modified by Chris Davies <chris.davies@bcs.org.uk>, 1998-10-29, to
 # permit textarea boxes as well as simple text boxes. The fields tag
@@ -710,6 +710,8 @@ sub do_add {
   $password = $password || password_prompt();
   push(@args,'-passwd'=>$password);
 
+  $info ||= '';
+
   my @info = split(/[,]/,$info);
   if (@info) {
     my %info = %{$db->get_fields(-name=>$user)};
@@ -724,9 +726,11 @@ sub do_add {
   print "Password successfully changed for $user.\n"
     if $db->set_passwd(@args);
 
+  $groups ||= '';
+
   my @groups = split(/[\s,]/,$groups);
   @groups = $DEFAULT_GROUP unless $current || @groups;
-  @groups = () if $groups[0]=~/^(-|''|"")$/;
+  @groups = () if @groups && $groups[0]=~/^(-|''|"")$/;
   print "Group set to @groups.\n"
     if @groups && $db->set_group(-user=>$user,-group=>\@groups);
   &audit_trail("cmd $admin: add user '$user' groups '$groups' info '$info'");
@@ -769,6 +773,7 @@ sub do_group {
 
 sub do_view {
     my($db,@user) = @_;
+    local $^W = 0; #can't stand this
     my (@list);
     if (@user) {
 	@list = @user;

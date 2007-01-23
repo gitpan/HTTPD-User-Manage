@@ -1,11 +1,11 @@
-# $Id: SQL.pm,v 1.2 2003/01/16 19:41:31 lstein Exp $
+# $Id: SQL.pm,v 1.3 2007/01/23 16:18:56 lstein Exp $
 package HTTPD::UserAdmin::SQL;
 use DBI;
 use Carp ();
 use strict;
 use vars qw(@ISA $VERSION);
 @ISA = qw(HTTPD::UserAdmin);
-$VERSION = (qw$Revision: 1.2 $)[1];
+$VERSION = (qw$Revision: 1.3 $)[1];
 
 my %Default = (HOST => "",                  #server hostname
 	       DB => "",                    #database name
@@ -123,7 +123,8 @@ sub update {
 
     $f{$self->{PASSWORDFIELD}}=$self->encrypt($passwd) if $passwd;
 
-    my $statement = 
+    local $^W = 0; # can't stand this
+    my $statement =
 	sprintf("UPDATE %s SET %s\n WHERE %s = '%s'\n",
 		$self->{USERTABLE},
 		join(',', map {$_ . "=" . ($self->_is_string($_,$f{$_}) ? "'$f{$_}'" : $f{$_}) } keys %f),
@@ -177,6 +178,7 @@ sub fetch {
 
 sub _is_string {
     my ($self,$field_name,$field_value) = @_;
+    $field_value ||= '';
     if ($self->{DRIVER} =~ /^msql$/i) {
 	unless ($self->{'_TYPES'}) {
 	    require Msql;
